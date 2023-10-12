@@ -8,7 +8,7 @@ import (
 	"github.com/primevprotocol/oracle/pkg/chaintracer"
 )
 
-func TestInfura(t *testing.T) {
+func TestDataPull(t *testing.T) {
 	tracer := chaintracer.NewIncrementingTracer(18293308)
 	for ; ; tracer.IncrementBlock() {
 		blockData, builder, _ := tracer.RetrieveDetails()

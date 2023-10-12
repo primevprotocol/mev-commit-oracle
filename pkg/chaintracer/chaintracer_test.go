@@ -1,20 +1,18 @@
 package chaintracer_test
 
 import (
-	"fmt"
+	"reflect"
 	"testing"
-	"time"
 
 	"github.com/primevprotocol/oracle/pkg/chaintracer"
 )
 
 func TestDataPull(t *testing.T) {
 	tracer := chaintracer.NewIncrementingTracer(18293308)
-	for ; ; tracer.IncrementBlock() {
-		blockData, builder, _ := tracer.RetrieveDetails()
-		fmt.Println(blockData.Transactions[0])
-		fmt.Println(builder)
-		time.Sleep(1 * time.Second)
+	_, builder, _ := tracer.RetrieveDetails()
+
+	if !reflect.DeepEqual("titanbuilder", builder) {
+		t.Error("winning builder is not titanbuilder for block 18293308")
 	}
 
 }

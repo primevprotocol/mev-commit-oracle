@@ -120,7 +120,8 @@ func main() {
 	log.Info().Str("Transaction Hash", txn.Hash().String()).Msg("Builder Address Added")
 	/* End of setup */
 
-	tracer := dummyTracer{10}
+	// tracer := dummyTracer{10}
+	tracer := chaintracer.NewIncrementingTracer(18293308, time.Second*2)
 	for {
 		blockNumber := tracer.IncrementBlock()
 		details, builder, err := tracer.RetrieveDetails()

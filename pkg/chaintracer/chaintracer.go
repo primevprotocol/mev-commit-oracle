@@ -3,13 +3,13 @@ package chaintracer
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
 )
 
 type TransactionHash []byte
@@ -25,14 +25,16 @@ type InfuraResponse struct {
 	Result  BlockDetails `json:"result"`
 }
 
-func NewIncrementingTracer(startingBlockNumber int64) Tracer {
+func NewIncrementingTracer(startingBlockNumber int64, rateLimit time.Duration) Tracer {
 	return &IncrementingTracer{
 		BlockNumber: startingBlockNumber,
+		RateLimit:   rateLimit,
 	}
 }
 
 type IncrementingTracer struct {
 	BlockNumber int64
+	RateLimit   time.Duration
 }
 
 type Tracer interface {
@@ -49,18 +51,22 @@ type Payload struct {
 
 func (it *IncrementingTracer) IncrementBlock() (NewBlockNumber int64) {
 	it.BlockNumber += 1
-	fmt.Println(it.BlockNumber)
+	log.Info().Int64("BlockNumber", it.BlockNumber).Msg("Incremented Block Number")
 	return it.BlockNumber
 }
 
 func (it *IncrementingTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
+	time.Sleep(it.RateLimit)
 	retries := 0
 	var blockData *BlockDetails
+	log.Debug().Msg("Starting Retreival of Block Details")
 	// Retrieve Block Details from Infura
 	for blockData == nil {
+		log.Debug().Msg("fetching infura data")
 		blockData = InfuraData(it.BlockNumber)
 		time.Sleep(time.Duration(retries*2) * time.Second)
 		if retries > 5 {
+			log.Error().Msg("Error: Could not retrieve block data")
 			return nil, "", errors.New("Error: Could not retrieve block data")
 		}
 		retries += 1
@@ -68,9 +74,10 @@ func (it *IncrementingTracer) RetrieveDetails() (block *BlockDetails, BlockBuild
 	retries = 0
 	var builderName string
 	for builderName == "" {
+		log.Debug().Msg("fetching Payloadsde data")
 		builderName, err = PayloadsDe(it.BlockNumber)
 		if err != nil {
-			fmt.Println("Error: Could not retrieve block data")
+			log.Error().Err(err).Msg("Error: Could not retrieve block data")
 		}
 		time.Sleep(time.Duration(retries*2) * time.Second)
 		if retries > 5 {
@@ -78,27 +85,36 @@ func (it *IncrementingTracer) RetrieveDetails() (block *BlockDetails, BlockBuild
 		}
 		retries += 1
 	}
+	log.Debug().
+		Str("BlockNumber", blockData.BlockNumber).
+		Str("Builder", builderName).
+		Int("Txns Received", len(blockData.Transactions)).
+		Msg("Finished Retreival of Block Details")
 
 	return blockData, builderName, nil
 }
 
 func PayloadsDe(blockNumber int64) (string, error) {
-	url := fmt.Sprintf("https://api.payload.de/block_info?block=%d", blockNumber)
+	url := "https://api.payload.de/block_info?block=" + strconv.FormatInt(blockNumber, 10)
 	resp, err := http.Get(url)
+	log.Debug().Msg("payloadsde data recieved")
 	if err != nil {
-		fmt.Println("Error sending request:", err)
+		log.Error().Err(err).Str("URL", url).Msg("Error sending request")
 		return "", err
 	}
 	defer resp.Body.Close()
+
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Error reading response:", err)
+		log.Error().Err(err).Msg("Error reading response")
 		return "", err
 	}
+
 	var payload struct {
 		Builder string `json:"builder"`
 	}
 	json.Unmarshal(data, &payload)
+
 	return payload.Builder, nil
 }
 
@@ -113,13 +129,13 @@ func InfuraData(blockNumber int64) *BlockDetails {
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Println("Error marshalling payload:", err)
+		log.Error().Err(err).Msg("Error marshalling payload")
 		return nil
 	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
 	if err != nil {
-		fmt.Println("Error creating request:", err)
+		log.Error().Err(err).Msg("Error creating request")
 		return nil
 	}
 
@@ -129,7 +145,7 @@ func InfuraData(blockNumber int64) *BlockDetails {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Error sending request:", err)
+		log.Error().Err(err).Msg("Error sending request")
 		return nil
 	}
 	defer resp.Body.Close()
@@ -139,12 +155,12 @@ func InfuraData(blockNumber int64) *BlockDetails {
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Error reading response:", err)
+		log.Error().Err(err).Msg("Error reading response")
 		return nil
 	}
 	json.Unmarshal(data, &infuraresp)
 	if infuraresp.Result.BlockNumber == "" {
-		fmt.Println("Error: Block data is empty")
+		log.Error().Msg("Error: Block data is empty")
 		return nil
 	}
 	return &infuraresp.Result

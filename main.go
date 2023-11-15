@@ -88,35 +88,42 @@ func main() {
 	contractAddress := flag.String("contract", "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9", "Contract address")
 	clientURL := flag.String("url", "http://localhost:8545", "Client URL")
 	privateKeyInput := flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
-	chainIDInput := flag.Int64("chainID", 31337, "Chain ID")
 	rateLimit := flag.Int64("rateLimit", 2, "Rate Limit in seconds")
 
 	flag.Parse()
 
-	chainID := big.NewInt(*chainIDInput)
-
 	client, err := ethclient.Dial(*clientURL)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to connect to the Ethereum client")
+		return
 	}
 
 	rc, err := rollupclient.NewClient(common.HexToAddress(*contractAddress), client)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating rollup client")
+		return
 	}
 
+	chainID, err := client.ChainID(context.Background())
+	if err != nil {
+		log.Error().Err(err).Msg("Error getting chain ID")
+		return
+	}
+	log.Debug().Str("Chain ID", chainID.String()).Msg("Chain ID Detected")
 	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating private key")
+		return
 	}
 	auth, err := getAuth(privateKey, chainID, client)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to construct auth")
-		os.Exit(1)
+		return
 	}
 	txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3"))
 	if err != nil {
 		log.Error().Err(err).Msg("Error adding builder address")
+		return
 	}
 	log.Info().Str("Transaction Hash", txn.Hash().String()).Msg("Builder Address Added")
 	/* End of setup */
@@ -128,15 +135,17 @@ func main() {
 		details, builder, err := tracer.RetrieveDetails()
 		if err != nil {
 			log.Panic().Err(err).Msg("Error retrieving block details")
+			return
 		}
 		auth, err := getAuth(privateKey, chainID, client)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to construct auth")
-			os.Exit(1)
+			return
 		}
 		blockDataTxn, err := rc.ReceiveBlockData(auth, details.Transactions, big.NewInt(blockNumber), builder)
 		if err != nil {
 			log.Error().Err(err).Msg("Error on receive block data")
+			return
 		}
 		log.Info().Str("Transaction Hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	}

@@ -13,9 +13,11 @@ The main utility has several flags:
 
 - chainID: This flag is used to specify the chain ID of the settlement layer. The default value is 31337. TODO(@ckartik): can get from rpc connection.
 
+- rateLimit: The time to wait before querying 3rd party services for more data.
+
 These flags can be overridden by providing new values when running the program. For example:
 
-`go run main.go -contract=NewContractAddress -url=NewClientURL -key=NewPrivateKey -chainID=NewChainID`
+`go run main.go -contract=NewContractAddress -url=NewClientURL -key=NewPrivateKey -chainID=NewChainID  --rateLimit=5`
 
 
 

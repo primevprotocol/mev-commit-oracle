@@ -5,8 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
+	"flag"
 	"math/big"
+	"os"
 	"strconv"
 	"time"
 
@@ -16,34 +17,37 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/primevprotocol/oracle/pkg/chaintracer"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
-func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.Client) (opts *bind.TransactOpts) {
+func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.Client) (opts *bind.TransactOpts, err error) {
 	// Set transaction opts
 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
 	if err != nil {
-		fmt.Errorf("Failed to construct auth: %v", auth)
+		log.Error().Err(err).Msg("Failed to construct auth")
+		return nil, err
 	}
-	fmt.Println(client.ChainID(context.Background()))
-
 	// Set nonce (optional)
 	nonce, err := client.PendingNonceAt(context.Background(), auth.From)
 	if err != nil {
-		fmt.Printf("Failed to get nonce: %v", err)
+		log.Error().Err(err).Msg("Failed to get nonce")
+		return nil, err
 	}
 	auth.Nonce = big.NewInt(int64(nonce))
 
 	// Set gas price (optional)
 	gasPrice, err := client.SuggestGasPrice(context.Background())
 	if err != nil {
-		fmt.Printf("Failed to get gas price: %v", err)
+		log.Error().Err(err).Msg("Failed to get gas price")
+		return nil, err
 	}
 	auth.GasPrice = gasPrice
 
 	// Set gas limit (you need to estimate or set a fixed value)
 	auth.GasLimit = uint64(30000000) // Example value
 
-	return auth
+	return auth, nil
 }
 
 type dummyTracer struct {
@@ -71,52 +75,67 @@ func (d *dummyTracer) RetrieveDetails() (block *chaintracer.BlockDetails, BlockB
 	}
 
 	sleepDuration, _ := rand.Int(rand.Reader, big.NewInt(12))
-
 	time.Sleep(time.Duration(sleepDuration.Int64()) * time.Second)
 	return block, "k builder", nil
 }
 
 func main() {
-	fmt.Println("Hello")
+	// Initialize zerolog
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	log.Logger = log.Output(os.Stderr)
 
-	CONTRACT_ADDRESS := "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-	CLIENT_URL := "http://localhost:8545"
+	/* Start of Setup */
+	contractAddress := flag.String("contract", "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9", "Contract address")
+	clientURL := flag.String("url", "http://localhost:8545", "Client URL")
+	privateKeyInput := flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
+	chainIDInput := flag.Int64("chainID", 31337, "Chain ID")
 
-	client, err := ethclient.Dial(CLIENT_URL)
+	flag.Parse()
+
+	chainID := big.NewInt(*chainIDInput)
+
+	client, err := ethclient.Dial(*clientURL)
 	if err != nil {
-		fmt.Printf("Failed to connect to the Ethereum client: %v", err)
+		log.Error().Err(err).Msg("Failed to connect to the Ethereum client")
 	}
 
-	privateKey, err := crypto.HexToECDSA("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+	rc, err := rollupclient.NewClient(common.HexToAddress(*contractAddress), client)
 	if err != nil {
-		fmt.Println("error creating private key")
+		log.Error().Err(err).Msg("Error creating rollup client")
 	}
 
-	rc, err := rollupclient.NewClient(common.HexToAddress(CONTRACT_ADDRESS), client)
+	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
 	if err != nil {
-		fmt.Println("error creating rollup client")
+		log.Error().Err(err).Msg("Error creating private key")
 	}
-	CHAIN_ID := big.NewInt(31337)
-	txn, err := rc.AddBuilderAddress(getAuth(privateKey, CHAIN_ID, client), "k builder", common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3"))
+	auth, err := getAuth(privateKey, chainID, client)
 	if err != nil {
-		fmt.Println("error adding builder address")
+		log.Error().Err(err).Msg("Failed to construct auth")
+		os.Exit(1)
 	}
-	fmt.Println(txn.Hash().String())
+	txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3"))
+	if err != nil {
+		log.Error().Err(err).Msg("Error adding builder address")
+	}
+	log.Info().Str("Transaction Hash", txn.Hash().String()).Msg("Builder Address Added")
+	/* End of setup */
 
-	// tracer := chaintracer.NewIncrementingTracer(18293308)
-	// TODO(@ckartik): Remove dummy tracer, only mean't to be used offline for testing
 	tracer := dummyTracer{10}
 	for {
 		blockNumber := tracer.IncrementBlock()
 		details, builder, err := tracer.RetrieveDetails()
 		if err != nil {
-			panic(err)
+			log.Panic().Err(err).Msg("Error retrieving block details")
 		}
-		blockDataTxn, err := rc.ReceiveBlockData(getAuth(privateKey, CHAIN_ID, client), details.Transactions, big.NewInt(blockNumber), builder)
+		auth, err := getAuth(privateKey, chainID, client)
 		if err != nil {
-
-			fmt.Printf("error on recieve block data %v", err)
+			log.Error().Err(err).Msg("Failed to construct auth")
+			os.Exit(1)
 		}
-		fmt.Println(blockDataTxn.Hash().String())
+		blockDataTxn, err := rc.ReceiveBlockData(auth, details.Transactions, big.NewInt(blockNumber), builder)
+		if err != nil {
+			log.Error().Err(err).Msg("Error on receive block data")
+		}
+		log.Info().Str("Transaction Hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	}
 }

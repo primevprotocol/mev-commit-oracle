@@ -1,6 +1,5 @@
 # Oracle
-
-![](./Oracle.png)
+Connects to the Oracle contract to trigger rewards and slashing of commitments.
 
 ## Usage
 

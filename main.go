@@ -89,6 +89,7 @@ func main() {
 	clientURL := flag.String("url", "http://localhost:8545", "Client URL")
 	privateKeyInput := flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
 	chainIDInput := flag.Int64("chainID", 31337, "Chain ID")
+	rateLimit := flag.Int64("rateLimit", 2, "Rate Limit in seconds")
 
 	flag.Parse()
 
@@ -121,7 +122,7 @@ func main() {
 	/* End of setup */
 
 	// tracer := dummyTracer{10}
-	tracer := chaintracer.NewIncrementingTracer(18293308, time.Second*2)
+	tracer := chaintracer.NewIncrementingTracer(18293308, time.Second*time.Duration(*rateLimit))
 	for {
 		blockNumber := tracer.IncrementBlock()
 		details, builder, err := tracer.RetrieveDetails()

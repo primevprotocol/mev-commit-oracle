@@ -56,6 +56,7 @@ func (it *IncrementingTracer) IncrementBlock() (NewBlockNumber int64) {
 }
 
 func (it *IncrementingTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
+	log.Info().Str("RateLimit", it.RateLimit.String()).Msg("Waiting for Rate Limit")
 	time.Sleep(it.RateLimit)
 	retries := 0
 	var blockData *BlockDetails
@@ -85,8 +86,8 @@ func (it *IncrementingTracer) RetrieveDetails() (block *BlockDetails, BlockBuild
 		}
 		retries += 1
 	}
-	log.Debug().
-		Str("BlockNumber", blockData.BlockNumber).
+	log.Info().
+		Int64("BlockNumber", it.BlockNumber).
 		Str("Builder", builderName).
 		Int("Txns Received", len(blockData.Transactions)).
 		Msg("Finished Retreival of Block Details")

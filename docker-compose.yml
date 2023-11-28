@@ -8,6 +8,21 @@ services:
     restart: always
     networks:
       oracle-network:
+    ports:
+      - "8080:13523"
+    labels:
+      com.datadoghq.ad.check_names: '["openmetrics"]'
+      com.datadoghq.ad.init_configs: '[{}]'
+      com.datadoghq.ad.instances: |
+        [
+          {
+            "openmetrics_endpoint": "http://%%host%%:13523/metrics",
+            "namespace": "oracle",
+            "metrics": [
+              "oracle_metrics*",
+            ]
+          }
+        ]
 
   datadog-agent:
     image: gcr.io/datadoghq/agent:7

@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/rand"
-	"encoding/hex"
 	"flag"
 	"math/big"
 	"os"
@@ -62,9 +60,10 @@ func (d *dummyTracer) IncrementBlock() int64 {
 func (d *dummyTracer) RetrieveDetails() (block *chaintracer.BlockDetails, BlockBuilder string, err error) {
 	block = &chaintracer.BlockDetails{
 		BlockNumber:  strconv.FormatInt(d.blockNumberCurrent, 10),
-		Transactions: []string{},
+		Transactions: []string{"0xdeadbeef"},
 	}
 
+	/*
 	for i := 0; i < 200; i++ {
 		randomInt, err := rand.Int(rand.Reader, big.NewInt(1000))
 		if err != nil {
@@ -76,6 +75,7 @@ func (d *dummyTracer) RetrieveDetails() (block *chaintracer.BlockDetails, BlockB
 
 	sleepDuration, _ := rand.Int(rand.Reader, big.NewInt(12))
 	time.Sleep(time.Duration(sleepDuration.Int64()) * time.Second)
+	*/
 	return block, "k builder", nil
 }
 
@@ -87,9 +87,7 @@ func main() {
 	/* Start of Setup */
 	contractAddress := flag.String("contract", "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9", "Contract address")
 	clientURL := flag.String("url", "http://localhost:8545", "Client URL")
-	privateKeyInput := flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
-	rateLimit := flag.Int64("rateLimit", 2, "Rate Limit in seconds")
-	startBlockNumber := flag.Int64("startBlockNumber", 18293308, "Start Block Number")
+	privateKeyInput := flag.String("key", "b17b77fe56797c1a6c236f628d25ede823496af371b3fec858a7a6beff07696b", "Private Key")
 
 	flag.Parse()
 
@@ -121,24 +119,26 @@ func main() {
 		log.Error().Err(err).Msg("Failed to construct auth")
 		return
 	}
-	txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3"))
+	txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x15766e4fC283Bb52C5c470648AeA2b5Ad133410a"))
 	if err != nil {
 		log.Error().Err(err).Msg("Error adding builder address")
 		return
 	}
+	time.Sleep(3 * time.Second)
 	log.Info().Str("Transaction Hash", txn.Hash().String()).Msg("Builder Address Added")
 	/* End of setup */
 
-	// tracer := dummyTracer{10}
-	tracer := chaintracer.NewIncrementingTracer(*startBlockNumber, time.Second*time.Duration(*rateLimit))
-	for {
-		blockNumber := tracer.IncrementBlock()
+	tracer := dummyTracer{2}
+	// tracer := chaintracer.NewIncrementingTracer(*startBlockNumber, time.Second*time.Duration(*rateLimit))
+	//for {
+	//	blockNumber := tracer.IncrementBlock()
+		var blockNumber int64 = 2
 		details, builder, err := tracer.RetrieveDetails()
 		if err != nil {
 			log.Panic().Err(err).Msg("Error retrieving block details")
 			return
 		}
-		auth, err := getAuth(privateKey, chainID, client)
+		auth, err = getAuth(privateKey, chainID, client)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to construct auth")
 			return
@@ -149,5 +149,5 @@ func main() {
 			return
 		}
 		log.Info().Str("Transaction Hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
-	}
+	//}
 }

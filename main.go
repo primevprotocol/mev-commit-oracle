@@ -82,7 +82,8 @@ func (d *dummyTracer) RetrieveDetails() (block *chaintracer.BlockDetails, BlockB
 func main() {
 	// Initialize zerolog
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(os.Stderr)
+	log.Logger = log.Output(os.Stdout)
+
 
 	/* Start of Setup */
 	contractAddress := flag.String("contract", "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9", "Contract address")

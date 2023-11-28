@@ -86,12 +86,20 @@ func main() {
 
 	/* Start of Setup */
 	contractAddress := flag.String("contract", "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9", "Contract address")
-	clientURL := flag.String("url", "http://localhost:8545", "Client URL")
+	clientURL := flag.String("rpc-url", "http://localhost:8545", "Client URL")
 	privateKeyInput := flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
 	rateLimit := flag.Int64("rateLimit", 2, "Rate Limit in seconds")
-	startBlockNumber := flag.Int64("startBlockNumber", 18293308, "Start Block Number")
+	startBlockNumber := flag.Int64("startBlockNumber", 0, "Start Block Number")
 
+	log.Info().Msg("Parsing flags...")
 	flag.Parse()
+	log.Debug().
+		Str("Contract Address", *contractAddress).
+		Str("Client URL", *clientURL).
+		Str("Private Key", "**********").
+		Int64("Rate Limit", *rateLimit).
+		Int64("Start Block Number", *startBlockNumber).
+		Msg("Flags Parsed")
 
 	client, err := ethclient.Dial(*clientURL)
 	if err != nil {
@@ -111,42 +119,53 @@ func main() {
 		return
 	}
 	log.Debug().Str("Chain ID", chainID.String()).Msg("Chain ID Detected")
+
+	// TODO(@ckartik): Move privatekey to AWS KMS
 	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating private key")
 		return
 	}
-	auth, err := getAuth(privateKey, chainID, client)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to construct auth")
-		return
-	}
-	txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3"))
-	if err != nil {
-		log.Error().Err(err).Msg("Error adding builder address")
-		return
-	}
-	log.Info().Str("Transaction Hash", txn.Hash().String()).Msg("Builder Address Added")
+	/*
+		auth, err := getAuth(privateKey, chainID, client)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to construct auth")
+			return
+		}
+
+		// Ensure we've added the builder address to the oracle.
+		// An example of how to add a builder is shown below.
+		//
+		// txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x15766e4fC283Bb52C5c470648AeA2b5Ad133410a"))
+		// if err != nil {
+		// 	log.Error().Err(err).Msg("Error adding builder address")
+		// 	return
+		// }
+
+		log.Info().Str("Transaction Hash", txn.Hash().String()).Msg("Builder Address Added")
+	*/
 	/* End of setup */
 
 	// tracer := dummyTracer{10}
 	tracer := chaintracer.NewIncrementingTracer(*startBlockNumber, time.Second*time.Duration(*rateLimit))
 	for {
 		blockNumber := tracer.IncrementBlock()
+		log.Info().Int64("block_number", blockNumber).Msg("Starting to process Block")
 		details, builder, err := tracer.RetrieveDetails()
 		if err != nil {
-			log.Panic().Err(err).Msg("Error retrieving block details")
-			return
+			log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details")
+			continue
 		}
 		auth, err := getAuth(privateKey, chainID, client)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to construct auth")
 			return
 		}
+		log.Debug().Str("Block Number", details.BlockNumber).Msg("Posting data to settlement layer")
 		blockDataTxn, err := rc.ReceiveBlockData(auth, details.Transactions, big.NewInt(blockNumber), builder)
 		if err != nil {
-			log.Error().Err(err).Msg("Error on receive block data")
-			return
+			log.Error().Err(err).Msg("Error posting data to sttlement layer")
+			continue
 		}
 		log.Info().Str("Transaction Hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	}

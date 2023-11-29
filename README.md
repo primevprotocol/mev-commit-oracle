@@ -1,6 +1,14 @@
 # Oracle
 Connects to the Oracle contract to trigger rewards and slashing of commitments.
 
+
+## Enviornment Variables to run for Docker-compose
+- Ensure the Deploy_env variable is set specific to the environment you're running in. For example, in local run, do the following
+```bash
+$ DEPLOY_ENV="env:local"; DD_KEY="<Datadog-key>"; docker compose up --build
+```
+
+
 ## Usage
 
 The main utility has several flags:
@@ -39,3 +47,12 @@ There are two implementations:
 
 ## Open Concerns on Oracle
 - We need to have a reliable way of determining the winning builder.
+
+## Oracle Approach - Trade Off
+The current appraoch for the Oracle microservice and on-chain components, is to feed all blocks incrementally on-chain.
+
+There's an alternative approach, where the Smart-contract only emits an event to request block data, in a sitution where there is a need for some block data.
+- This saves on redenduant posting of blockdata, but is an optimization. 
+- Assuming there's at least 1 pre-confirmation per block, this would be a useless optimization.
+
+![Oracle Ticketing Alternative Image](./Oracle%20Ticketing%20Alternative.png)

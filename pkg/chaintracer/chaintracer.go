@@ -2,13 +2,18 @@ package chaintracer
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
+	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
 )
 
@@ -23,6 +28,27 @@ type InfuraResponse struct {
 	Jsonrpc string       `json:"jsonrpc"`
 	ID      int          `json:"id"`
 	Result  BlockDetails `json:"result"`
+}
+
+// We can maintain a skipped block list in the smart contract
+
+// SmartContractTracer is a tracer that uses the smart contract
+// to retrieve details about the next block that needs to be proccesed
+// it has the option of
+type SmartContractTracer struct {
+	contractClient *rollupclient.Rollupclient
+}
+
+func (SmartContractTracer) IncrementBlock() (NewBlockNumber int64) {
+	// Get Next Block to be procceesed
+	// Increment Block Number
+	contractClient.getNextRequestedBlockNumber()
+
+	return 0
+}
+
+func NewSmartContractTracer() {
+
 }
 
 func NewIncrementingTracer(startingBlockNumber int64, rateLimit time.Duration) Tracer {
@@ -165,4 +191,39 @@ func InfuraData(blockNumber int64) *BlockDetails {
 		return nil
 	}
 	return &infuraresp.Result
+}
+
+func NewDummyTracer() Tracer {
+	return &dummyTracer{
+		blockNumberCurrent: 0,
+	}
+}
+
+type dummyTracer struct {
+	blockNumberCurrent int64
+}
+
+func (d *dummyTracer) IncrementBlock() int64 {
+	d.blockNumberCurrent += 1
+	return d.blockNumberCurrent
+}
+
+func (d *dummyTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
+	block = &BlockDetails{
+		BlockNumber:  strconv.FormatInt(d.blockNumberCurrent, 10),
+		Transactions: []string{},
+	}
+
+	for i := 0; i < 200; i++ {
+		randomInt, err := rand.Int(rand.Reader, big.NewInt(1000))
+		if err != nil {
+			panic(err)
+		}
+		randomBytes := crypto.Keccak256(randomInt.Bytes())
+		block.Transactions = append(block.Transactions, hex.EncodeToString(randomBytes))
+	}
+
+	sleepDuration, _ := rand.Int(rand.Reader, big.NewInt(12))
+	time.Sleep(time.Duration(sleepDuration.Int64()) * time.Second)
+	return block, "k builder", nil
 }

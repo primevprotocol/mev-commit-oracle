@@ -3,12 +3,9 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/rand"
-	"encoding/hex"
 	"flag"
 	"math/big"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -50,47 +47,25 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 	return auth, nil
 }
 
-type dummyTracer struct {
-	blockNumberCurrent int64
-}
+var (
+	contractAddress  = flag.String("contract", "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9", "Contract address")
+	clientURL        = flag.String("rpc-url", "http://localhost:8545", "Client URL")
+	privateKeyInput  = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
+	rateLimit        = flag.Int64("rateLimit", 2, "Rate Limit in seconds")
+	startBlockNumber = flag.Int64("startBlockNumber", 0, "Start Block Number")
 
-func (d *dummyTracer) IncrementBlock() int64 {
-	d.blockNumberCurrent += 1
-	return d.blockNumberCurrent
-}
+	client  *ethclient.Client
+	rc      *rollupclient.Rollupclient
+	chainID *big.Int
+)
 
-func (d *dummyTracer) RetrieveDetails() (block *chaintracer.BlockDetails, BlockBuilder string, err error) {
-	block = &chaintracer.BlockDetails{
-		BlockNumber:  strconv.FormatInt(d.blockNumberCurrent, 10),
-		Transactions: []string{},
-	}
-
-	for i := 0; i < 200; i++ {
-		randomInt, err := rand.Int(rand.Reader, big.NewInt(1000))
-		if err != nil {
-			panic(err)
-		}
-		randomBytes := crypto.Keccak256(randomInt.Bytes())
-		block.Transactions = append(block.Transactions, hex.EncodeToString(randomBytes))
-	}
-
-	sleepDuration, _ := rand.Int(rand.Reader, big.NewInt(12))
-	time.Sleep(time.Duration(sleepDuration.Int64()) * time.Second)
-	return block, "k builder", nil
-}
-
-func main() {
+func init() {
+	var err error
 	// Initialize zerolog
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(os.Stderr)
+	log.Logger = log.Output(os.Stdout)
 
 	/* Start of Setup */
-	contractAddress := flag.String("contract", "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9", "Contract address")
-	clientURL := flag.String("rpc-url", "http://localhost:8545", "Client URL")
-	privateKeyInput := flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
-	rateLimit := flag.Int64("rateLimit", 2, "Rate Limit in seconds")
-	startBlockNumber := flag.Int64("startBlockNumber", 0, "Start Block Number")
-
 	log.Info().Msg("Parsing flags...")
 	flag.Parse()
 	log.Debug().
@@ -101,59 +76,59 @@ func main() {
 		Int64("Start Block Number", *startBlockNumber).
 		Msg("Flags Parsed")
 
-	client, err := ethclient.Dial(*clientURL)
+	client, err = ethclient.Dial(*clientURL)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to connect to the Ethereum client")
-		return
+		panic(err)
 	}
 
-	rc, err := rollupclient.NewClient(common.HexToAddress(*contractAddress), client)
+	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*contractAddress), client)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating rollup client")
-		return
+		panic(err)
 	}
 
-	chainID, err := client.ChainID(context.Background())
+	chainID, err = client.ChainID(context.Background())
 	if err != nil {
 		log.Error().Err(err).Msg("Error getting chain ID")
-		return
+		panic(err)
 	}
 	log.Debug().Str("Chain ID", chainID.String()).Msg("Chain ID Detected")
+}
 
+func SetBuilderMapping(pk *ecdsa.PrivateKey, builderName string, builderAddress common.Address) (txnHash string, err error) {
+	auth, err := getAuth(pk, chainID, client)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to construct auth")
+		return
+	}
+
+	txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x15766e4fC283Bb52C5c470648AeA2b5Ad133410a"))
+	if err != nil {
+		log.Error().Err(err).Msg("Error adding builder address")
+		return "", err
+	}
+
+	return txn.Hash().String(), nil
+}
+
+// Have some metrics for the number of events registered
+
+func main() {
 	// TODO(@ckartik): Move privatekey to AWS KMS
 	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating private key")
 		return
 	}
-	/*
-		auth, err := getAuth(privateKey, chainID, client)
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to construct auth")
-			return
-		}
 
-		// Ensure we've added the builder address to the oracle.
-		// An example of how to add a builder is shown below.
-		//
-		// txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x15766e4fC283Bb52C5c470648AeA2b5Ad133410a"))
-		// if err != nil {
-		// 	log.Error().Err(err).Msg("Error adding builder address")
-		// 	return
-		// }
-
-		log.Info().Str("Transaction Hash", txn.Hash().String()).Msg("Builder Address Added")
-	*/
-	/* End of setup */
-
-	// tracer := dummyTracer{10}
 	tracer := chaintracer.NewIncrementingTracer(*startBlockNumber, time.Second*time.Duration(*rateLimit))
-	for {
-		blockNumber := tracer.IncrementBlock()
+
+	for blockNumber := *startBlockNumber; ; blockNumber = tracer.IncrementBlock() {
 		log.Info().Int64("block_number", blockNumber).Msg("Starting to process Block")
 		details, builder, err := tracer.RetrieveDetails()
 		if err != nil {
-			log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details")
+			log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details, will skip block")
 			continue
 		}
 		auth, err := getAuth(privateKey, chainID, client)
@@ -161,12 +136,12 @@ func main() {
 			log.Error().Err(err).Msg("Failed to construct auth")
 			return
 		}
-		log.Debug().Str("Block Number", details.BlockNumber).Msg("Posting data to settlement layer")
+		log.Debug().Str("block_number", details.BlockNumber).Msg("Posting data to settlement layer")
 		blockDataTxn, err := rc.ReceiveBlockData(auth, details.Transactions, big.NewInt(blockNumber), builder)
 		if err != nil {
-			log.Error().Err(err).Msg("Error posting data to sttlement layer")
+			log.Error().Err(err).Msg("Error posting data to settlement layer")
 			continue
 		}
-		log.Info().Str("Transaction Hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
+		log.Info().Int("data_sent_bytes", len(details.Transactions)*32).Str("txn_hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	}
 }

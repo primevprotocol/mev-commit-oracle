@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
@@ -46,8 +47,14 @@ type SmartContractTracer struct {
 func (st *SmartContractTracer) GetNextBlockNumber() (NewBlockNumber int64) {
 	// Get Next Block to be procceesed
 	// Increment Block Number
-	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{})
+
+	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+		Pending: false,
+		From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+		Context: nil,
+	})
 	if err != nil {
+
 		log.Error().Err(err).Msg("Error getting next block number")
 		panic(err)
 	}
@@ -57,8 +64,6 @@ func (st *SmartContractTracer) GetNextBlockNumber() (NewBlockNumber int64) {
 
 // TODO(@ckartik): Move logic for service based data request to an isolated function.
 func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
-	log.Info().Str("RateLimit", st.RateLimit.String()).Msg("Waiting for Rate Limit")
-	time.Sleep(st.RateLimit)
 	retries := 0
 	var blockData *BlockDetails
 	log.Debug().Msg("Starting Retreival of Block Details")
@@ -96,7 +101,12 @@ func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuil
 	return blockData, builderName, nil
 }
 
-func NewSmartContractTracer() {
+func NewSmartContractTracer(contractClient *rollupclient.Rollupclient) Tracer {
+	tracer := &SmartContractTracer{
+		contractClient: contractClient,
+	}
+	tracer.GetNextBlockNumber()
+	return tracer
 
 }
 

@@ -48,10 +48,10 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 }
 
 var (
-	contractAddress  = flag.String("contract", "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9", "Contract address")
+	contractAddress  = flag.String("contract", "0x0F81Ae3c80CD1fBa5579690Dd0425f74035DCF32", "Contract address")
 	clientURL        = flag.String("rpc-url", "http://localhost:8545", "Client URL")
 	privateKeyInput  = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
-	rateLimit        = flag.Int64("rateLimit", 2, "Rate Limit in seconds")
+	rateLimit        = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
 	startBlockNumber = flag.Int64("startBlockNumber", 0, "Start Block Number")
 
 	client  *ethclient.Client
@@ -122,9 +122,9 @@ func main() {
 		return
 	}
 
-	tracer := chaintracer.NewIncrementingTracer(*startBlockNumber, time.Second*time.Duration(*rateLimit))
-
-	for blockNumber := *startBlockNumber; ; blockNumber = tracer.GetNextBlockNumber() {
+	// tracer := chaintracer.NewIncrementingTracer(*startBlockNumber, time.Second*time.Duration(*rateLimit))
+	tracer := chaintracer.NewSmartContractTracer(rc)
+	for blockNumber := tracer.GetNextBlockNumber(); ; blockNumber = tracer.GetNextBlockNumber() {
 		log.Info().Int64("block_number", blockNumber).Msg("Starting to process Block")
 		details, builder, err := tracer.RetrieveDetails()
 		if err != nil {
@@ -143,5 +143,6 @@ func main() {
 			continue
 		}
 		log.Info().Int("data_sent_bytes", len(details.Transactions)*32).Str("txn_hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
+		time.Sleep(time.Second * time.Duration((*rateLimit)))
 	}
 }

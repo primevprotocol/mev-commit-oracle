@@ -34,7 +34,7 @@ These flags can be overridden by providing new values when running the program. 
 The core part of this service is the chain tracer, which has the following interface:
 ```go
 type Tracer interface {
-	IncrementBlock() (NewBlockNumber int64)
+	GetNextBlockNumber() (NewBlockNumber int64)
 	RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error)
 }
 ```

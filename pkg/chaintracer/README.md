@@ -5,8 +5,8 @@ Chaintracer is meant to be a wrapper for any source of truth around blocks and t
 ### Interface
 ```go
 type Tracer interface {
-  // IncrementBlock moves the pointer tracing blocks forward to the next block, and returns the new current blocknumber being tracked.
-	IncrementBlock() (NewBlockNumber int64)
+  // GetNextBlockNumber moves the pointer tracing blocks forward to the next block, and returns the new current blocknumber being tracked.
+	GetNextBlockNumber() (NewBlockNumber int64)
   // RetrieveDetails retrieves the transactionHashes list and winning blocknumber for the internal blocknumber being tracked.
 	RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error)
 }

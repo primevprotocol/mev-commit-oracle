@@ -124,7 +124,7 @@ func main() {
 
 	tracer := chaintracer.NewIncrementingTracer(*startBlockNumber, time.Second*time.Duration(*rateLimit))
 
-	for blockNumber := *startBlockNumber; ; blockNumber = tracer.IncrementBlock() {
+	for blockNumber := *startBlockNumber; ; blockNumber = tracer.GetNextBlockNumber() {
 		log.Info().Int64("block_number", blockNumber).Msg("Starting to process Block")
 		details, builder, err := tracer.RetrieveDetails()
 		if err != nil {

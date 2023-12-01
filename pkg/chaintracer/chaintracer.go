@@ -2,13 +2,20 @@ package chaintracer
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
+	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
 )
 
@@ -25,6 +32,84 @@ type InfuraResponse struct {
 	Result  BlockDetails `json:"result"`
 }
 
+// We can maintain a skipped block list in the smart contract
+
+// SmartContractTracer is a tracer that uses the smart contract
+// to retrieve details about the next block that needs to be proccesed
+// it has the option of
+type SmartContractTracer struct {
+	contractClient           *rollupclient.Rollupclient
+	currentBlockNumberCached int64
+
+	RateLimit time.Duration
+}
+
+func (st *SmartContractTracer) GetNextBlockNumber() (NewBlockNumber int64) {
+	// Get Next Block to be procceesed
+	// Increment Block Number
+
+	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+		Pending: false,
+		From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+		Context: nil,
+	})
+	if err != nil {
+
+		log.Error().Err(err).Msg("Error getting next block number")
+		panic(err)
+	}
+	st.currentBlockNumberCached = nextBlockNumber.Int64()
+	return st.currentBlockNumberCached
+}
+
+// TODO(@ckartik): Move logic for service based data request to an isolated function.
+func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
+	retries := 0
+	var blockData *BlockDetails
+	log.Debug().Msg("Starting Retreival of Block Details")
+	// Retrieve Block Details from Infura
+	for blockData == nil {
+		log.Debug().Msg("fetching infura data")
+		blockData = InfuraData(st.currentBlockNumberCached)
+		time.Sleep(time.Duration(retries*5) * time.Second)
+		if retries > 5 {
+			log.Error().Msg("Error: Could not retrieve block data")
+			return nil, "", errors.New("Error: Could not retrieve block data")
+		}
+		retries += 1
+	}
+	retries = 0
+	var builderName string
+	for builderName == "" {
+		log.Debug().Msg("fetching Payloadsde data")
+		builderName, err = PayloadsDe(st.currentBlockNumberCached)
+		if err != nil {
+			log.Error().Err(err).Msg("Error: Could not retrieve block data")
+		}
+		time.Sleep(time.Duration(retries*5) * time.Second)
+		if retries > 5 {
+			return nil, "", errors.New("Error: Could not retrieve block data")
+		}
+		retries += 1
+	}
+	log.Info().
+		Int64("BlockNumber", st.currentBlockNumberCached).
+		Str("Builder", builderName).
+		Int("Txns Received", len(blockData.Transactions)).
+		Msg("Finished Retreival of Block Details")
+
+	return blockData, builderName, nil
+}
+
+func NewSmartContractTracer(contractClient *rollupclient.Rollupclient) Tracer {
+	tracer := &SmartContractTracer{
+		contractClient: contractClient,
+	}
+	tracer.GetNextBlockNumber()
+	return tracer
+
+}
+
 func NewIncrementingTracer(startingBlockNumber int64, rateLimit time.Duration) Tracer {
 	return &IncrementingTracer{
 		BlockNumber: startingBlockNumber,
@@ -38,7 +123,7 @@ type IncrementingTracer struct {
 }
 
 type Tracer interface {
-	IncrementBlock() (NewBlockNumber int64)
+	GetNextBlockNumber() (NewBlockNumber int64)
 	RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error)
 }
 
@@ -49,7 +134,7 @@ type Payload struct {
 	ID      int           `json:"id"`
 }
 
-func (it *IncrementingTracer) IncrementBlock() (NewBlockNumber int64) {
+func (it *IncrementingTracer) GetNextBlockNumber() (NewBlockNumber int64) {
 	it.BlockNumber += 1
 	log.Info().Int64("BlockNumber", it.BlockNumber).Msg("Incremented Block Number")
 	return it.BlockNumber
@@ -165,4 +250,39 @@ func InfuraData(blockNumber int64) *BlockDetails {
 		return nil
 	}
 	return &infuraresp.Result
+}
+
+func NewDummyTracer() Tracer {
+	return &dummyTracer{
+		blockNumberCurrent: 0,
+	}
+}
+
+type dummyTracer struct {
+	blockNumberCurrent int64
+}
+
+func (d *dummyTracer) GetNextBlockNumber() int64 {
+	d.blockNumberCurrent += 1
+	return d.blockNumberCurrent
+}
+
+func (d *dummyTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
+	block = &BlockDetails{
+		BlockNumber:  strconv.FormatInt(d.blockNumberCurrent, 10),
+		Transactions: []string{},
+	}
+
+	for i := 0; i < 200; i++ {
+		randomInt, err := rand.Int(rand.Reader, big.NewInt(1000))
+		if err != nil {
+			panic(err)
+		}
+		randomBytes := crypto.Keccak256(randomInt.Bytes())
+		block.Transactions = append(block.Transactions, hex.EncodeToString(randomBytes))
+	}
+
+	sleepDuration, _ := rand.Int(rand.Reader, big.NewInt(12))
+	time.Sleep(time.Duration(sleepDuration.Int64()) * time.Second)
+	return block, "k builder", nil
 }

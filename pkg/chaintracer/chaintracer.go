@@ -45,19 +45,21 @@ type SmartContractTracer struct {
 }
 
 func (st *SmartContractTracer) GetNextBlockNumber() (NewBlockNumber int64) {
-	// Get Next Block to be procceesed
-	// Increment Block Number
-
 	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
 		Pending: false,
 		From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
 		Context: nil,
 	})
-	if err != nil {
-
-		log.Error().Err(err).Msg("Error getting next block number")
-		panic(err)
+	for err != nil {
+		log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
+		time.Sleep(5 * time.Second)
+		nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+			Pending: false,
+			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+			Context: nil,
+		})
 	}
+
 	st.currentBlockNumberCached = nextBlockNumber.Int64()
 	return st.currentBlockNumberCached
 }

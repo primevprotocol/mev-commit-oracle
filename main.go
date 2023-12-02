@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"flag"
 	"math/big"
 	"os"
-	"time"
+	"os/signal"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -16,6 +17,9 @@ import (
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.Client) (opts *bind.TransactOpts, err error) {
@@ -57,6 +61,9 @@ var (
 	client  *ethclient.Client
 	rc      *rollupclient.Rollupclient
 	chainID *big.Int
+
+	otelTracer             = otel.Tracer("oracle_block_submitted")
+	blockSubmissionCounter metric.Int64Counter
 )
 
 func init() {
@@ -113,36 +120,101 @@ func SetBuilderMapping(pk *ecdsa.PrivateKey, builderName string, builderAddress 
 }
 
 // Have some metrics for the number of events registered
-
 func main() {
+	if err := run(); err != nil {
+		log.Fatal().Err(err).Msg("Error running")
+	}
+}
+
+func run() (err error) {
+	// Set up OpenTelemetry.
+	serviceName := "oracle"
+	serviceVersion := "0.1.0"
+	// Handle SIGINT (CTRL+C) gracefully.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	otelShutdown, err := setupOTelSDK(ctx, serviceName, serviceVersion)
+	if err != nil {
+		return
+	}
+
+	// Handle shutdown properly so nothing leaks.
+	defer func() {
+		err = errors.Join(err, otelShutdown(context.Background()))
+	}()
+
 	// TODO(@ckartik): Move privatekey to AWS KMS
 	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating private key")
-		return
+		return err
 	}
 
 	// tracer := chaintracer.NewIncrementingTracer(*startBlockNumber, time.Second*time.Duration(*rateLimit))
-	tracer := chaintracer.NewSmartContractTracer(rc)
-	for blockNumber := tracer.GetNextBlockNumber(); ; blockNumber = tracer.GetNextBlockNumber() {
-		log.Info().Int64("block_number", blockNumber).Msg("Starting to process Block")
-		details, builder, err := tracer.RetrieveDetails()
-		if err != nil {
-			log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details, will skip block")
-			continue
+	tracer := chaintracer.NewSmartContractTracer(rc, ctx)
+	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("Shutting down")
+			otelShutdown(ctx)
+			log.Info().Msg("Shutdown complete")
+			return nil
+		default:
+			log.Info().Msg("Processing")
+			err = submitBlock(ctx, blockNumber, tracer, privateKey)
+			switch err {
+			case nil:
+			case ErrorBlockDetails:
+				log.Error().Err(err).Msg("Error retrieving block details")
+				continue
+			case ErrorAuth:
+				log.Error().Err(err).Msg("Error constructing auth")
+				continue
+			case ErrorBlockSubmission:
+				log.Error().Err(err).Msg("Error submitting block")
+				continue
+			default:
+				log.Error().Err(err).Msg("Unknown error")
+				return err
+			}
+
 		}
-		auth, err := getAuth(privateKey, chainID, client)
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to construct auth")
-			return
-		}
-		log.Debug().Str("block_number", details.BlockNumber).Msg("Posting data to settlement layer")
-		blockDataTxn, err := rc.ReceiveBlockData(auth, details.Transactions, big.NewInt(blockNumber), builder)
-		if err != nil {
-			log.Error().Err(err).Msg("Error posting data to settlement layer")
-			continue
-		}
-		log.Info().Int("data_sent_bytes", len(details.Transactions)*32).Str("txn_hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
-		time.Sleep(time.Second * time.Duration((*rateLimit)))
+
 	}
+}
+
+var (
+	ErrorBlockDetails = errors.New("Error retrieving block details")
+	ErrorAuth         = errors.New("Error constructing auth")
+
+	ErrorBlockSubmission = errors.New("Error submitting block")
+)
+
+func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey) (err error) {
+	ctx, span := otelTracer.Start(ctx, "block_submission")
+	defer span.End()
+
+	blockNumberAttr := attribute.Int64("blocknumber.value", blockNumber)
+	span.SetAttributes(blockNumberAttr)
+
+	details, builder, err := tracer.RetrieveDetails()
+	if err != nil {
+		log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details")
+		return ErrorBlockDetails
+	}
+	auth, err := getAuth(privateKey, chainID, client)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to construct auth")
+		return ErrorAuth
+	}
+	log.Debug().Str("block_number", details.BlockNumber).Msg("Posting data to settlement layer")
+	blockDataTxn, err := rc.ReceiveBlockData(auth, details.Transactions, big.NewInt(blockNumber), builder)
+	if err != nil {
+		log.Error().Err(err).Msg("Error posting data to settlement layer")
+		return ErrorBlockSubmission
+	}
+	blockSubmissionCounter.Add(ctx, 1)
+	log.Info().Int("data_sent_bytes", len(details.Transactions)*32).Str("txn_hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
+	return nil
 }

@@ -2,6 +2,7 @@ package chaintracer
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -44,20 +45,26 @@ type SmartContractTracer struct {
 	RateLimit time.Duration
 }
 
-func (st *SmartContractTracer) GetNextBlockNumber() (NewBlockNumber int64) {
+func (st *SmartContractTracer) GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64) {
 	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
 		Pending: false,
 		From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-		Context: nil,
+		Context: ctx,
 	})
 	for err != nil {
-		log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
-		time.Sleep(5 * time.Second)
-		nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
-			Pending: false,
-			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-			Context: nil,
-		})
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("Context cancelled, exiting GetNextBlockNumber")
+			return -1
+		default:
+			log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
+			time.Sleep(5 * time.Second)
+			nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+				Pending: false,
+				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+				Context: ctx,
+			})
+		}
 	}
 
 	st.currentBlockNumberCached = nextBlockNumber.Int64()
@@ -103,11 +110,11 @@ func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuil
 	return blockData, builderName, nil
 }
 
-func NewSmartContractTracer(contractClient *rollupclient.Rollupclient) Tracer {
+func NewSmartContractTracer(contractClient *rollupclient.Rollupclient, ctx context.Context) Tracer {
 	tracer := &SmartContractTracer{
 		contractClient: contractClient,
 	}
-	tracer.GetNextBlockNumber()
+	tracer.GetNextBlockNumber(ctx)
 	return tracer
 
 }
@@ -125,7 +132,7 @@ type IncrementingTracer struct {
 }
 
 type Tracer interface {
-	GetNextBlockNumber() (NewBlockNumber int64)
+	GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64)
 	RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error)
 }
 
@@ -136,7 +143,7 @@ type Payload struct {
 	ID      int           `json:"id"`
 }
 
-func (it *IncrementingTracer) GetNextBlockNumber() (NewBlockNumber int64) {
+func (it *IncrementingTracer) GetNextBlockNumber(_ context.Context) (NewBlockNumber int64) {
 	it.BlockNumber += 1
 	log.Info().Int64("BlockNumber", it.BlockNumber).Msg("Incremented Block Number")
 	return it.BlockNumber
@@ -264,7 +271,7 @@ type dummyTracer struct {
 	blockNumberCurrent int64
 }
 
-func (d *dummyTracer) GetNextBlockNumber() int64 {
+func (d *dummyTracer) GetNextBlockNumber(_ context.Context) int64 {
 	d.blockNumberCurrent += 1
 	return d.blockNumberCurrent
 }

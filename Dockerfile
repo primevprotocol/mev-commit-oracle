@@ -3,7 +3,7 @@ FROM golang:1.21.1 AS builder
 WORKDIR /app
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o mev-oracle ./main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o mev-oracle .
 
 FROM alpine:latest
 

@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
+
 	"github.com/rs/zerolog/log"
 )
 
@@ -32,6 +33,37 @@ type InfuraResponse struct {
 	ID      int          `json:"id"`
 	Result  BlockDetails `json:"result"`
 }
+
+// type optimizationFilter struct {
+// 	db            map[string]bool
+// 	preConfClient *preconf.PreConf
+// }
+
+// // The Future Fitler interface is used to initialize the filter
+// type OptimizationFilterFuture interface {
+// 	InitFilter(blockNumber int64) <-chan error
+// }
+
+// // NOTE: Need to manage situation where the contracts receive a commitment after the block has been updated ot blockNumber
+// func (f optimizationFilter) InitFilter(blockNumber int64) (errChannel chan error) {
+// 	go func(errChannel chan error) {
+// 		commitments, err := f.preConfClient.GetCommitmentsByBlockNumber(&bind.CallOpts{
+// 			Pending: false,
+// 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+// 			Context: context.Background(),
+// 		}, big.NewInt(blockNumber))
+// 		if err != nil {
+// 			log.Error().Err(err).Msg("Error getting commitments")
+// 			return nil
+// 		}
+// 		for _, commitment := range commitments {
+// 			// Pull commitment txn form sc
+// 			// f.db[commitment.String()] = true
+// 		}
+// 	}(errChannel)
+
+// 	return errChannel
+// }
 
 // We can maintain a skipped block list in the smart contract
 

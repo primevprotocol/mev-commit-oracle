@@ -5,7 +5,9 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"flag"
+	"fmt"
 	"math/big"
+	"net/http"
 	"os"
 	"os/signal"
 
@@ -15,11 +17,27 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/primevprotocol/oracle/pkg/chaintracer"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
+)
+
+var (
+	contractAddress  = flag.String("contract", "0x0F81Ae3c80CD1fBa5579690Dd0425f74035DCF32", "Contract address")
+	clientURL        = flag.String("rpc-url", "http://localhost:8545", "Client URL")
+	privateKeyInput  = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
+	rateLimit        = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
+	startBlockNumber = flag.Int64("startBlockNumber", 0, "Start Block Number")
+
+	client  *ethclient.Client
+	rc      *rollupclient.Rollupclient
+	chainID *big.Int
+
+	blockSubmissionCounter = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "oracle_block_submissions_total",
+		Help: "Total number of oracle block submissions",
+	})
 )
 
 func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.Client) (opts *bind.TransactOpts, err error) {
@@ -51,21 +69,6 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 	return auth, nil
 }
 
-var (
-	contractAddress  = flag.String("contract", "0x0F81Ae3c80CD1fBa5579690Dd0425f74035DCF32", "Contract address")
-	clientURL        = flag.String("rpc-url", "http://localhost:8545", "Client URL")
-	privateKeyInput  = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
-	rateLimit        = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
-	startBlockNumber = flag.Int64("startBlockNumber", 0, "Start Block Number")
-
-	client  *ethclient.Client
-	rc      *rollupclient.Rollupclient
-	chainID *big.Int
-
-	otelTracer             = otel.Tracer("oracle_block_submitted")
-	blockSubmissionCounter metric.Int64Counter
-)
-
 func init() {
 	var err error
 	// Initialize zerolog
@@ -83,22 +86,41 @@ func init() {
 		Int64("Start Block Number", *startBlockNumber).
 		Msg("Flags Parsed")
 
+	// Initializing Prometheus
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(blockSubmissionCounter)
+
+	router := http.NewServeMux()
+	router.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+
+	server := &http.Server{
+		Addr:    fmt.Sprintf(":%d", 8080),
+		Handler: router,
+	}
+
+	go func() {
+		log.Info().Msg("Starting Prometheus server")
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error().Err(err).Msg("failed to start server")
+		}
+	}()
+
 	client, err = ethclient.Dial(*clientURL)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to connect to the Ethereum client")
-		panic(err)
+		os.Exit(1)
 	}
 
 	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*contractAddress), client)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating rollup client")
-		panic(err)
+		os.Exit(1)
 	}
 
 	chainID, err = client.ChainID(context.Background())
 	if err != nil {
 		log.Error().Err(err).Msg("Error getting chain ID")
-		panic(err)
+		os.Exit(1)
 	}
 	log.Debug().Str("Chain ID", chainID.String()).Msg("Chain ID Detected")
 }
@@ -127,22 +149,9 @@ func main() {
 }
 
 func run() (err error) {
-	// Set up OpenTelemetry.
-	serviceName := "oracle"
-	serviceVersion := "0.1.0"
 	// Handle SIGINT (CTRL+C) gracefully.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-
-	otelShutdown, err := setupOTelSDK(ctx, serviceName, serviceVersion)
-	if err != nil {
-		return
-	}
-
-	// Handle shutdown properly so nothing leaks.
-	defer func() {
-		err = errors.Join(err, otelShutdown(context.Background()))
-	}()
 
 	// TODO(@ckartik): Move privatekey to AWS KMS
 	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
@@ -157,7 +166,7 @@ func run() (err error) {
 		select {
 		case <-ctx.Done():
 			log.Info().Msg("Shutting down")
-			otelShutdown(ctx)
+			// Shutdown prometehus server here TODO
 			log.Info().Msg("Shutdown complete")
 			return nil
 		default:
@@ -192,12 +201,6 @@ var (
 )
 
 func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey) (err error) {
-	ctx, span := otelTracer.Start(ctx, "block_submission")
-	defer span.End()
-
-	blockNumberAttr := attribute.Int64("blocknumber.value", blockNumber)
-	span.SetAttributes(blockNumberAttr)
-
 	details, builder, err := tracer.RetrieveDetails()
 	if err != nil {
 		log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details")
@@ -214,7 +217,7 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 		log.Error().Err(err).Msg("Error posting data to settlement layer")
 		return ErrorBlockSubmission
 	}
-	blockSubmissionCounter.Add(ctx, 1)
+	blockSubmissionCounter.Inc()
 	log.Info().Int("data_sent_bytes", len(details.Transactions)*32).Str("txn_hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	return nil
 }

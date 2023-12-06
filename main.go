@@ -19,6 +19,18 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var (
+	contractAddress  = flag.String("contract", "0x0F81Ae3c80CD1fBa5579690Dd0425f74035DCF32", "Contract address")
+	clientURL        = flag.String("rpc-url", "http://localhost:8545", "Client URL")
+	privateKeyInput  = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
+	rateLimit        = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
+	startBlockNumber = flag.Int64("startBlockNumber", 0, "Start Block Number")
+
+	client  *ethclient.Client
+	rc      *rollupclient.Rollupclient
+	chainID *big.Int
+)
+
 func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.Client) (opts *bind.TransactOpts, err error) {
 	// Set transaction opts
 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
@@ -47,18 +59,6 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 
 	return auth, nil
 }
-
-var (
-	contractAddress  = flag.String("contract", "0x0F81Ae3c80CD1fBa5579690Dd0425f74035DCF32", "Contract address")
-	clientURL        = flag.String("rpc-url", "http://localhost:8545", "Client URL")
-	privateKeyInput  = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
-	rateLimit        = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
-	startBlockNumber = flag.Int64("startBlockNumber", 0, "Start Block Number")
-
-	client  *ethclient.Client
-	rc      *rollupclient.Rollupclient
-	chainID *big.Int
-)
 
 func init() {
 	var err error

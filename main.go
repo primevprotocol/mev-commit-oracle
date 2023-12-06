@@ -80,19 +80,19 @@ func init() {
 	client, err = ethclient.Dial(*clientURL)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to connect to the Ethereum client")
-		panic(err)
+		os.Exit(1)
 	}
 
 	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*contractAddress), client)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating rollup client")
-		panic(err)
+		os.Exit(1)
 	}
 
 	chainID, err = client.ChainID(context.Background())
 	if err != nil {
 		log.Error().Err(err).Msg("Error getting chain ID")
-		panic(err)
+		os.Exit(1)
 	}
 	log.Debug().Str("Chain ID", chainID.String()).Msg("Chain ID Detected")
 }

@@ -77,9 +77,6 @@ func (f optimizationFilter) InitFilter(blockNumber int64) (filter chan map[strin
 				Context: context.Background(),
 			}, commitment)
 			if err != nil {
-				// Handle err in retrieving txn hash in a global context to the oracle payload submission operation.
-				// The operation should be atomic, either it all fails, or it all succeeds.
-				// TODO(@ckartik):
 				log.Error().Err(err).Msg("Error getting txn hash from commitment")
 				errChannel <- err
 				return

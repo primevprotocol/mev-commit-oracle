@@ -16,7 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
-	preconf "github.com/primevprotocol/oracle/pkg/PreConf"
+	"github.com/primevprotocol/oracle/pkg/preconf"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
 )
@@ -37,19 +37,28 @@ type InfuraResponse struct {
 // We can maintain a skipped block list in the smart contract
 
 type optimizationFilter struct {
-	db            map[string]bool
 	preConfClient *preconf.PreConfClient
 }
 
 // The Future Fitler interface is used to initialize the filter
-type OptimizationFilterFuture interface {
-	InitFilter(blockNumber int64) <-chan error
+type TransactionFilter interface {
+	InitFilter(blockNumber int64) (chan map[string]bool, chan error)
+}
+
+func NewTransactionCommitmentFilter(preConfClient *preconf.PreConfClient) TransactionFilter {
+	return &optimizationFilter{
+		preConfClient: preConfClient,
+	}
 }
 
 // TODO(@ckartik): Adds init filter
+// Need to model the creation of pre-confirmations from a searcher
 // NOTE: Need to manage situation where the contracts receive a commitment after the block has been updated to blockNumber
-func (f optimizationFilter) InitFilter(blockNumber int64) (errChannel chan error) {
-	go func(errChannel chan error) {
+func (f optimizationFilter) InitFilter(blockNumber int64) (filter chan map[string]bool, errChannel chan error) {
+	filter = make(chan map[string]bool)
+	errChannel = make(chan error)
+	go func(filter chan map[string]bool, errChannel chan error) {
+		db := make(map[string]bool)
 		commitments, err := f.preConfClient.GetCommitmentsByBlockNumber(&bind.CallOpts{
 			Pending: false,
 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
@@ -70,14 +79,19 @@ func (f optimizationFilter) InitFilter(blockNumber int64) (errChannel chan error
 			if err != nil {
 				// Handle err in retrieving txn hash in a global context to the oracle payload submission operation.
 				// The operation should be atomic, either it all fails, or it all succeeds.
+				// TODO(@ckartik):
+				log.Error().Err(err).Msg("Error getting txn hash from commitment")
+				errChannel <- err
+				return
 			}
 
 			// Must clear this variable
-			f.db[commitmentTxnHash] = true // Set encountered TxnHash to true
+			db[commitmentTxnHash] = true // Set encountered TxnHash to true
 		}
-	}(errChannel)
+		filter <- db
+	}(filter, errChannel)
 
-	return errChannel
+	return filter, errChannel
 }
 
 // SmartContractTracer is a tracer that uses the smart contract

@@ -14,19 +14,22 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/primevprotocol/oracle/pkg/chaintracer"
+	"github.com/primevprotocol/oracle/pkg/preconf"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 var (
-	contractAddress  = flag.String("contract", "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0", "Contract address")
+	oracleContract   = flag.String("oracle", "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0", "Oracle contract address")
+	preConfContract  = flag.String("preconf", "0x15766e4fC283Bb52C5c470648AeA2b5Ad133410a", "Preconf contract address")
 	clientURL        = flag.String("rpc-url", "http://localhost:8545", "Client URL")
 	privateKeyInput  = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
 	rateLimit        = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
 	startBlockNumber = flag.Int64("startBlockNumber", 0, "Start Block Number")
 
 	client  *ethclient.Client
+	pc      *preconf.PreConfClient
 	rc      *rollupclient.Rollupclient
 	chainID *big.Int
 )
@@ -70,7 +73,8 @@ func init() {
 	log.Info().Msg("Parsing flags...")
 	flag.Parse()
 	log.Debug().
-		Str("Contract Address", *contractAddress).
+		Str("Contract Address", *oracleContract).
+		Str("Preconf Contract Address", *preConfContract).
 		Str("Client URL", *clientURL).
 		Str("Private Key", "**********").
 		Int64("Rate Limit", *rateLimit).
@@ -83,9 +87,15 @@ func init() {
 		os.Exit(1)
 	}
 
-	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*contractAddress), client)
+	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*oracleContract), client)
 	if err != nil {
-		log.Error().Err(err).Msg("Error creating rollup client")
+		log.Error().Err(err).Msg("Error creating oracle client")
+		os.Exit(1)
+	}
+
+	pc, err = preconf.NewPreConfClient(common.HexToAddress(*preConfContract), client)
+	if err != nil {
+		log.Error().Err(err).Msg("Error creating preconf client")
 		os.Exit(1)
 	}
 
@@ -132,6 +142,8 @@ func run() (err error) {
 		return
 	}
 
+	txnFilter := chaintracer.NewTransactionCommitmentFilter(pc)
+
 	tracer := chaintracer.NewSmartContractTracer(rc, ctx)
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
 		select {
@@ -142,7 +154,7 @@ func run() (err error) {
 			return nil
 		default:
 			log.Info().Msg("Processing")
-			err = submitBlock(ctx, blockNumber, tracer, privateKey)
+			err = submitBlock(ctx, blockNumber, tracer, privateKey, txnFilter)
 			switch err {
 			case nil:
 			case ErrorBlockDetails:
@@ -167,9 +179,11 @@ var (
 	ErrorAuth         = errors.New("Error constructing auth")
 
 	ErrorBlockSubmission = errors.New("Error submitting block")
+	ErrorUnableToFilter  = errors.New("Unable to filter transactions based on commitment")
 )
 
-func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey) (err error) {
+func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnFilter chaintracer.TransactionFilter) (err error) {
+	filterChan, errorChan := txnFilter.InitFilter(blockNumber)
 	details, builder, err := tracer.RetrieveDetails()
 	if err != nil {
 		log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details")
@@ -180,13 +194,26 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 		log.Error().Err(err).Msg("Failed to construct auth")
 		return ErrorAuth
 	}
+	var transactionsToPost []string
+	select {
+	case db := <-filterChan:
+		for _, txn := range details.Transactions {
+			if db[txn] {
+				transactionsToPost = append(transactionsToPost, txn)
+			}
+		}
+		log.Info().Msg("Received data from filter")
+	case err := <-errorChan:
+		log.Error().Err(err).Msg("Error from filter")
+		return ErrorUnableToFilter
+	}
 	log.Debug().Str("block_number", details.BlockNumber).Msg("Posting data to settlement layer")
-	blockDataTxn, err := rc.ReceiveBlockData(auth, details.Transactions, big.NewInt(blockNumber), builder)
+	blockDataTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)
 	if err != nil {
 		log.Error().Err(err).Msg("Error posting data to settlement layer")
 		return ErrorBlockSubmission
 	}
 
-	log.Info().Int("data_sent_bytes", len(details.Transactions)*32).Str("txn_hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
+	log.Info().Int("data_sent_bytes", len(transactionsToPost)*32).Str("txn_hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	return nil
 }

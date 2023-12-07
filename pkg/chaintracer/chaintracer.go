@@ -16,7 +16,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
-	"github.com/primevprotocol/oracle/pkg/preconf"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
 )
@@ -35,9 +34,13 @@ type InfuraResponse struct {
 }
 
 // We can maintain a skipped block list in the smart contract
+type PreConfirmationsContract interface {
+	GetCommitmentsByBlockNumber(opts *bind.CallOpts, blockNumber *big.Int) ([][32]byte, error)
+	GetTxnHashFromCommitment(opts *bind.CallOpts, commitmentIndex [32]byte) (string, error)
+}
 
 type optimizationFilter struct {
-	preConfClient *preconf.PreConfClient
+	preConfClient PreConfirmationsContract
 }
 
 // The Future Fitler interface is used to initialize the filter
@@ -45,7 +48,7 @@ type TransactionFilter interface {
 	InitFilter(blockNumber int64) (chan map[string]bool, chan error)
 }
 
-func NewTransactionCommitmentFilter(preConfClient *preconf.PreConfClient) TransactionFilter {
+func NewTransactionCommitmentFilter(preConfClient PreConfirmationsContract) TransactionFilter {
 	return &optimizationFilter{
 		preConfClient: preConfClient,
 	}

@@ -5,15 +5,12 @@ import (
 	"crypto/ecdsa"
 	"log"
 	"math/big"
-	"reflect"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/primevprotocol/oracle/pkg/chaintracer"
-	"github.com/primevprotocol/oracle/pkg/rollupclient"
+	"github.com/stretchr/testify/assert"
 )
 
 func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.Client, t *testing.T) (opts *bind.TransactOpts) {
@@ -45,7 +42,6 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 }
 
 func TestDataPull(t *testing.T) {
-
 	CONTRACT_ADDRESS := "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
 	CLIENT_URL := "http://localhost:8545"
 
@@ -85,4 +81,47 @@ func TestDataPull(t *testing.T) {
 		t.Fatalf("error on recieve block data %v", err)
 	}
 	t.Log(txn2.Hash().String())
+}
+
+We can maintain a skipped block list in the smart contract
+type PreConfirmationsContract interface {
+	GetCommitmentsByBlockNumber(opts *bind.CallOpts, blockNumber *big.Int) ([][32]byte, error)
+	GetTxnHashFromCommitment(opts *bind.CallOpts, commitmentIndex [32]byte) (string, error)
+}
+
+type mockPreConfContract struct {
+	commitmentsAndTxnHashes map[[32]byte]string
+}
+
+func (m *mockPreConfContract) GetCommitmentsByBlockNumber(opts *bind.CallOpts, blockNumber *big.Int) ([][32]byte, error) {
+	commitments := [][32]byte{}
+	for commitment := range m.commitmentsAndTxnHashes {
+		commitments = append(commitments, commitment)
+	}
+	return commitments, nil
+}
+
+func (m *mockPreConfContract) GetTxnHashFromCommitment(opts *bind.CallOpts, commitmentIndex [32]byte) (string, error) {
+	return m.commitmentsAndTxnHashes[commitmentIndex], nil
+}
+
+func TestFilter(t *testing.T) {
+	txnFilter := chaintracer.NewTransactionCommitmentFilter(&mockPreConfContract{
+		commitmentsAndTxnHashes: map[[32]byte]string{
+			{0x02, 0x90, 0x00}: "0xalok",
+			{0x02, 0x90, 0x01}: "0xkartik",
+			{0x02, 0x90, 0x32}: "0xkant",
+			{0x02, 0x90, 0x02}: "0xshawn",
+		},
+	})
+	commitmentChannel, errChannel := txnFilter.InitFilter(2)
+	commit := <-commitmentChannel
+	assert.Equal(t, true, commit["0xalok"])
+	assert.Equal(t, true, commit["0xkartik"])
+	assert.Equal(t, true, commit["0xkant"])
+	assert.Equal(t, true, commit["0xshawn"])
+	assert.Equal(t, false, commit["0xmurat"])
+
+	assert.Nil(t, <-errChannel)
+
 }

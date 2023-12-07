@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	contractAddress  = flag.String("contract", "0x0F81Ae3c80CD1fBa5579690Dd0425f74035DCF32", "Contract address")
+	contractAddress  = flag.String("contract", "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0", "Contract address")
 	clientURL        = flag.String("rpc-url", "http://localhost:8545", "Client URL")
 	privateKeyInput  = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
 	rateLimit        = flag.Int64("rateLimit", 12, "Rate Limit in seconds")

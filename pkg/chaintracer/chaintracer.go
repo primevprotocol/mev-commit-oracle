@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
+	preconf "github.com/primevprotocol/oracle/pkg/PreConf"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
 )
@@ -34,6 +35,50 @@ type InfuraResponse struct {
 }
 
 // We can maintain a skipped block list in the smart contract
+
+type optimizationFilter struct {
+	db            map[string]bool
+	preConfClient *preconf.PreConfClient
+}
+
+// The Future Fitler interface is used to initialize the filter
+type OptimizationFilterFuture interface {
+	InitFilter(blockNumber int64) <-chan error
+}
+
+// TODO(@ckartik): Adds init filter
+// NOTE: Need to manage situation where the contracts receive a commitment after the block has been updated to blockNumber
+func (f optimizationFilter) InitFilter(blockNumber int64) (errChannel chan error) {
+	go func(errChannel chan error) {
+		commitments, err := f.preConfClient.GetCommitmentsByBlockNumber(&bind.CallOpts{
+			Pending: false,
+			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+			Context: context.Background(),
+		}, big.NewInt(blockNumber))
+		if err != nil {
+			log.Error().Err(err).Msg("Error getting commitments")
+			errChannel <- err
+			return
+		}
+
+		for _, commitment := range commitments {
+			commitmentTxnHash, err := f.preConfClient.GetTxnHashFromCommitment(&bind.CallOpts{
+				Pending: false,
+				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+				Context: context.Background(),
+			}, commitment)
+			if err != nil {
+				// Handle err in retrieving txn hash in a global context to the oracle payload submission operation.
+				// The operation should be atomic, either it all fails, or it all succeeds.
+			}
+
+			// Must clear this variable
+			f.db[commitmentTxnHash] = true // Set encountered TxnHash to true
+		}
+	}(errChannel)
+
+	return errChannel
+}
 
 // SmartContractTracer is a tracer that uses the smart contract
 // to retrieve details about the next block that needs to be proccesed

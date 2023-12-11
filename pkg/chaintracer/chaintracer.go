@@ -3,8 +3,6 @@ package chaintracer
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"math/big"
@@ -14,7 +12,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
@@ -31,6 +28,11 @@ type InfuraResponse struct {
 	Jsonrpc string       `json:"jsonrpc"`
 	ID      int          `json:"id"`
 	Result  BlockDetails `json:"result"`
+}
+
+type L1DataRetriver interface {
+	GetTransactions(blockNumber int64) (*BlockDetails, error)
+	GetWinningBuilder(blockNumber int64) (string, error)
 }
 
 // We can maintain a skipped block list in the smart contract
@@ -55,6 +57,7 @@ func NewTransactionCommitmentFilter(preConfClient PreConfirmationsContract) Tran
 }
 
 // TODO(@ckartik): Adds init filter
+// InitFilter initializes the a goroutine that will fetch all the commitments from the smart contract for the given blockNumber
 // Need to model the creation of pre-confirmations from a searcher
 // NOTE: Need to manage situation where the contracts receive a commitment after the block has been updated to blockNumber
 func (f optimizationFilter) InitFilter(blockNumber int64) (filter chan map[string]bool, errChannel chan error) {
@@ -137,7 +140,7 @@ func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuil
 	// Retrieve Block Details from Infura
 	for blockData == nil {
 		log.Debug().Msg("fetching infura data")
-		blockData = InfuraData(st.currentBlockNumberCached)
+		blockData = InfuraData(st.currentBlockNumberCached, "https://mainnet.infura.io/v3/b8877b173a0543bea7dca82c313e7347")
 		time.Sleep(time.Duration(retries*5) * time.Second)
 		if retries > 5 {
 			log.Error().Msg("Error: Could not retrieve block data")
@@ -215,7 +218,7 @@ func (it *IncrementingTracer) RetrieveDetails() (block *BlockDetails, BlockBuild
 	// Retrieve Block Details from Infura
 	for blockData == nil {
 		log.Debug().Msg("fetching infura data")
-		blockData = InfuraData(it.BlockNumber)
+		blockData = InfuraData(it.BlockNumber, "https://mainnet.infura.io/v3/b8877b173a0543bea7dca82c313e7347")
 		time.Sleep(time.Duration(retries*2) * time.Second)
 		if retries > 5 {
 			log.Error().Msg("Error: Could not retrieve block data")
@@ -246,6 +249,24 @@ func (it *IncrementingTracer) RetrieveDetails() (block *BlockDetails, BlockBuild
 	return blockData, builderName, nil
 }
 
+type MainnetInfuraAndPayloadsdeDataRetriever struct {
+	url string
+}
+
+func NewMainnetInfuraAndPayloadsdeDataRetriever() L1DataRetriver {
+	return &MainnetInfuraAndPayloadsdeDataRetriever{
+		url: "https://mainnet.infura.io/v3/b8877b173a0543bea7dca82c313e7347",
+	}
+}
+
+func (m MainnetInfuraAndPayloadsdeDataRetriever) GetTransactions(blockNumber int64) (*BlockDetails, error) {
+	return InfuraData(blockNumber, m.url), nil
+}
+
+func (m MainnetInfuraAndPayloadsdeDataRetriever) GetWinningBuilder(blockNumber int64) (string, error) {
+	return PayloadsDe(blockNumber)
+}
+
 func PayloadsDe(blockNumber int64) (string, error) {
 	url := "https://api.payload.de/block_info?block=" + strconv.FormatInt(blockNumber, 10)
 	resp, err := http.Get(url)
@@ -270,9 +291,9 @@ func PayloadsDe(blockNumber int64) (string, error) {
 	return payload.Builder, nil
 }
 
-func InfuraData(blockNumber int64) *BlockDetails {
+func InfuraData(blockNumber int64, url string) *BlockDetails {
 	hex := strconv.FormatInt(blockNumber, 16)
-	url := "https://mainnet.infura.io/v3/b8877b173a0543bea7dca82c313e7347"
+	// url := "https://mainnet.infura.io/v3/b8877b173a0543bea7dca82c313e7347"
 	payload := Payload{
 		Jsonrpc: "2.0",
 		Method:  "eth_getBlockByNumber",
@@ -316,39 +337,4 @@ func InfuraData(blockNumber int64) *BlockDetails {
 		return nil
 	}
 	return &infuraresp.Result
-}
-
-func NewDummyTracer() Tracer {
-	return &dummyTracer{
-		blockNumberCurrent: 0,
-	}
-}
-
-type dummyTracer struct {
-	blockNumberCurrent int64
-}
-
-func (d *dummyTracer) GetNextBlockNumber(_ context.Context) int64 {
-	d.blockNumberCurrent += 1
-	return d.blockNumberCurrent
-}
-
-func (d *dummyTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
-	block = &BlockDetails{
-		BlockNumber:  strconv.FormatInt(d.blockNumberCurrent, 10),
-		Transactions: []string{},
-	}
-
-	for i := 0; i < 200; i++ {
-		randomInt, err := rand.Int(rand.Reader, big.NewInt(1000))
-		if err != nil {
-			panic(err)
-		}
-		randomBytes := crypto.Keccak256(randomInt.Bytes())
-		block.Transactions = append(block.Transactions, hex.EncodeToString(randomBytes))
-	}
-
-	sleepDuration, _ := rand.Int(rand.Reader, big.NewInt(12))
-	time.Sleep(time.Duration(sleepDuration.Int64()) * time.Second)
-	return block, "k builder", nil
 }

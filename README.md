@@ -40,7 +40,7 @@ type Tracer interface {
 ```
 
 There are two implementations:
-- DummyTracer
+- MockTracer
     - This is fed random data and can be changed to custom data for e2e testing
 - IncrementingTracer
     - This is fed data from Infura (txns in block) and PayloadsDe (builder that won)

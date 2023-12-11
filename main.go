@@ -5,9 +5,15 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"flag"
+	"fmt"
 	"math/big"
 	"os"
 	"os/signal"
+	"time"
+
+	"database/sql"
+
+	_ "github.com/lib/pq"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -20,19 +26,54 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// DB Setup
+const (
+	host     = "172.30.1.3"
+	port     = 5432          // Default port for PostgreSQL
+	user     = "oracle_user" // Your database user
+	password = "oracle_pass" // Your database password
+	dbname   = "oracle_db"   // Your database name
+)
+
 var (
-	oracleContract   = flag.String("oracle", "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0", "Oracle contract address")
-	preConfContract  = flag.String("preconf", "0x15766e4fC283Bb52C5c470648AeA2b5Ad133410a", "Preconf contract address")
-	clientURL        = flag.String("rpc-url", "http://localhost:8545", "Client URL")
-	privateKeyInput  = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
-	rateLimit        = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
-	startBlockNumber = flag.Int64("startBlockNumber", 0, "Start Block Number")
+	oracleContract         = flag.String("oracle", "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707", "Oracle contract address")
+	preConfContract        = flag.String("preconf", "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0", "Preconf contract address")
+	clientURL              = flag.String("rpc-url", "http://host.docker.internal:8545", "Client URL")
+	privateKeyInput        = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
+	rateLimit              = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
+	startBlockNumber       = flag.Int64("startBlockNumber", 0, "Start Block Number")
+	onlyMonitorCommitments = flag.Bool("onlyMonitorCommitments", false, "Only monitor commitments")
+
+	// TODO(@ckartik): Pull txns commited to from DB and post in Oracle payload.
+	integreationTestMode = flag.Bool("integrationTestMode", false, "Integration Test Mode")
 
 	client  *ethclient.Client
 	pc      *preconf.PreConfClient
 	rc      *rollupclient.Rollupclient
 	chainID *big.Int
 )
+
+func initDB() (db *sql.DB, err error) {
+	// Connection string
+	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
+		"password=%s dbname=%s sslmode=disable",
+		host, port, user, password, dbname)
+
+	// Open a connection
+	db, err = sql.Open("postgres", psqlInfo)
+	if err != nil {
+		log.Error().Err(err).Msg("Error opening DB")
+		return nil, err
+	}
+
+	// Check the connection
+	err = db.Ping()
+	if err != nil {
+		log.Error().Err(err).Msg("Error pinging DB")
+	}
+
+	return db, err
+}
 
 func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.Client) (opts *bind.TransactOpts, err error) {
 	// Set transaction opts
@@ -79,6 +120,7 @@ func init() {
 		Str("Private Key", "**********").
 		Int64("Rate Limit", *rateLimit).
 		Int64("Start Block Number", *startBlockNumber).
+		Bool("Only Monitor Commitments", *onlyMonitorCommitments).
 		Msg("Flags Parsed")
 
 	client, err = ethclient.Dial(*clientURL)
@@ -144,6 +186,45 @@ func run() (err error) {
 
 	txnFilter := chaintracer.NewTransactionCommitmentFilter(pc)
 
+	db, err := initDB()
+	if err != nil {
+		log.Error().Err(err).Msg("Error initializing DB")
+		return
+	}
+	time.Sleep(5 * time.Second)
+	log.Info().Msg("Sleeping to allow DB to initialize tables")
+
+	if *onlyMonitorCommitments {
+		for blockNumber := 0; ; blockNumber++ {
+
+			filterChan, errorChan := txnFilter.InitFilter(int64(blockNumber))
+
+			select {
+			case <-ctx.Done():
+				log.Info().Msg("Shutting down")
+				// Shutdown prometehus server here TODO
+				log.Info().Msg("Shutdown complete")
+				return nil
+			case txnMap := <-filterChan:
+				for txn := range txnMap {
+					sqlStatement := `
+					INSERT INTO committed_transactions (transaction, block_number)
+					VALUES ($1, $2)`
+					_, err = db.Exec(sqlStatement, txn, blockNumber)
+					if err != nil {
+						log.Error().Err(err).Msg("Error inserting txn into DB")
+					}
+					log.Info().Str("Commitments", txn).Int("block_number", blockNumber).Msg("Commitment")
+
+					time.Sleep(500 * time.Millisecond)
+				}
+			case err := <-errorChan:
+				log.Error().Err(err).Msg("Error from filter")
+				return ErrorUnableToFilter
+			}
+		}
+
+	}
 	tracer := chaintracer.NewSmartContractTracer(rc, ctx)
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
 		select {

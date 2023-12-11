@@ -1,4 +1,5 @@
-version: '3'
+
+version: '3.8'
 
 services:
   oracle:
@@ -8,8 +9,7 @@ services:
     restart: always
     networks:
       oracle-network:
-    ports:
-      - "8080:13523"
+        ipv4_address: 172.30.1.2
     labels:
       com.datadoghq.ad.check_names: '["openmetrics"]'
       com.datadoghq.ad.init_configs: '[{}]'
@@ -24,29 +24,45 @@ services:
           }
         ]
 
-  datadog-agent:
-    image: gcr.io/datadoghq/agent:latest
+  db:
+    image: postgres:latest
     restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /proc/:/host/proc/:ro
-      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
     environment:
-      - DD_API_KEY=${DD_KEY}
-      - DD_TAGS=${DEPLOY_ENV}
-      - DD_SITE=datadoghq.com
-      - DD_LOGS_ENABLED=true
-      - DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true
-      - DD_CONTAINER_EXCLUDE="name:datadog-agent"
+      POSTGRES_DB: oracle_db
+      POSTGRES_USER: oracle_user
+      POSTGRES_PASSWORD: oracle_pass
     ports:
-      - "5000:5000"
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d
     networks:
       oracle-network:
-        ipv4_address: 172.29.0.3
+        ipv4_address: 172.30.1.3
 
 networks:
   oracle-network:
     ipam:
       driver: default
       config:
-        - subnet: 172.29.0.0/16
+        - subnet: 172.30.0.0/16
+
+volumes:
+  postgres_data:
+
+  # datadog-agent:
+  #   image: gcr.io/datadoghq/agent:latest
+  #   restart: always
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #     - /proc/:/host/proc/:ro
+  #     - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+  #   environment:
+  #     - DD_API_KEY=${DD_KEY}
+  #     - DD_TAGS=${DEPLOY_ENV}
+  #     - DD_SITE=datadoghq.com
+  #     - DD_LOGS_ENABLED=true
+  #     - DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true
+  #     - DD_CONTAINER_EXCLUDE="name:datadog-agent"
+  #   networks:
+  #     - oracle-network

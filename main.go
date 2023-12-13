@@ -184,43 +184,37 @@ func run() (err error) {
 		return
 	}
 
-	txnFilter := chaintracer.NewTransactionCommitmentFilter(pc)
+	// txnFilter := chaintracer.NewTransactionCommitmentFilter(pc)
 
 	db, err := initDB()
 	if err != nil {
 		log.Error().Err(err).Msg("Error initializing DB")
 		return
 	}
+	txnFilter := chaintracer.NewDBTxnFilter(db, pc)
 	time.Sleep(5 * time.Second)
 	log.Info().Msg("Sleeping to allow DB to initialize tables")
 
 	if *onlyMonitorCommitments {
-		for blockNumber := 0; ; blockNumber++ {
-
-			filterChan, errorChan := txnFilter.InitFilter(int64(blockNumber))
-
+		for blockNumber, _ := txnFilter.LargestStoredBlockNumber(); ; blockNumber++ {
+			done, err := txnFilter.UpdateCommitmentsForBlockNumber(int64(blockNumber))
 			select {
 			case <-ctx.Done():
 				log.Info().Msg("Shutting down")
-				// Shutdown prometehus server here TODO
-				log.Info().Msg("Shutdown complete")
-				return nil
-			case txnMap := <-filterChan:
-				for txn := range txnMap {
-					sqlStatement := `
-					INSERT INTO committed_transactions (transaction, block_number)
-					VALUES ($1, $2)`
-					_, err = db.Exec(sqlStatement, txn, blockNumber)
-					if err != nil {
-						log.Error().Err(err).Msg("Error inserting txn into DB")
-					}
-					log.Info().Str("Commitments", txn).Int("block_number", blockNumber).Msg("Commitment")
 
-					time.Sleep(500 * time.Millisecond)
+			case <-done:
+				log.Debug().Int64("blockNumber", blockNumber).Msg("Done updating commitments")
+				txns, err := txnFilter.RetrieveCommitments(blockNumber)
+				if err != nil {
+					log.Error().Err(err).Msg("Error retrieving commitments")
+					return err
 				}
-			case err := <-errorChan:
-				log.Error().Err(err).Msg("Error from filter")
-				return ErrorUnableToFilter
+				for txn := range txns {
+					time.Sleep(200 * time.Millisecond)
+					log.Info().Str("txn", txn).Msg("Txn was commited to")
+				}
+			case err := <-err:
+				log.Error().Err(err).Msg("Error updating commitments, skipping")
 			}
 		}
 
@@ -263,8 +257,8 @@ var (
 	ErrorUnableToFilter  = errors.New("Unable to filter transactions based on commitment")
 )
 
-func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnFilter chaintracer.TransactionFilter) (err error) {
-	filterChan, errorChan := txnFilter.InitFilter(blockNumber)
+func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnFilter chaintracer.CommitmentsStore) (err error) {
+	doneChan, errorChan := txnFilter.UpdateCommitmentsForBlockNumber(blockNumber)
 	details, builder, err := tracer.RetrieveDetails()
 	if err != nil {
 		log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details")
@@ -277,9 +271,14 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 	}
 	var transactionsToPost []string
 	select {
-	case db := <-filterChan:
+	case <-doneChan:
+		txnsCommitedTo, err := txnFilter.RetrieveCommitments(blockNumber)
+		if err != nil {
+			log.Error().Err(err).Msg("Error retrieving commitments")
+			return ErrorUnableToFilter
+		}
 		for _, txn := range details.Transactions {
-			if db[txn] {
+			if txnsCommitedTo[txn] {
 				transactionsToPost = append(transactionsToPost, txn)
 			}
 		}

@@ -155,7 +155,7 @@ func TestFilter(t *testing.T) {
 			{0x02, 0x90, 0x02}: "0xshawn",
 		},
 	})
-	commitmentChannel, errChannel := txnFilter.InitFilter(2)
+	commitmentChannel, errChannel := txnFilter.RetrieveCommitments(2)
 	commit := <-commitmentChannel
 	assert.Equal(t, true, commit["0xalok"])
 	assert.Equal(t, true, commit["0xkartik"])

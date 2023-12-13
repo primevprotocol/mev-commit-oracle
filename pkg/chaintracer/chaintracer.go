@@ -3,19 +3,17 @@ package chaintracer
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 
 	"io"
-	"math/big"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/lib/pq"
 	"github.com/pkg/errors"
+	"github.com/primevprotocol/oracle/pkg/repository"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
 )
@@ -36,200 +34,7 @@ type InfuraResponse struct {
 type L1DataRetriver interface {
 	GetTransactions(blockNumber int64) (*BlockDetails, error)
 	GetWinningBuilder(blockNumber int64) (string, error)
-}
-
-// We can maintain a skipped block list in the smart contract
-type PreConfirmationsContract interface {
-	GetCommitmentsByBlockNumber(opts *bind.CallOpts, blockNumber *big.Int) ([][32]byte, error)
-	GetTxnHashFromCommitment(opts *bind.CallOpts, commitmentIndex [32]byte) (string, error)
-}
-
-// CommitmentsStore is an interface that is used to retrieve commitments from the smart contract
-// and store them in a local database
-type CommitmentsStore interface {
-	UpdateCommitmentsForBlockNumber(blockNumber int64) (done chan struct{}, err chan error)
-	RetrieveCommitments(blockNumber int64) (map[string]bool, error)
-
-	// Used for restarting the Commitment Store on startup
-	LargestStoredBlockNumber() (int64, error)
-}
-
-type DBTxnFilter struct {
-	db            *sql.DB
-	preConfClient PreConfirmationsContract
-}
-
-func NewDBTxnFilter(db *sql.DB, preConfClient PreConfirmationsContract) CommitmentsStore {
-	return &DBTxnFilter{
-		db:            db,
-		preConfClient: preConfClient,
-	}
-}
-
-func (f DBTxnFilter) LargestStoredBlockNumber() (int64, error) {
-	var largestBlockNumber int64
-	err := f.db.QueryRow("SELECT MAX(block_number) FROM committed_transactions").Scan(&largestBlockNumber)
-	if err != nil {
-		return 0, err
-	}
-	return largestBlockNumber, nil
-}
-
-func (f DBTxnFilter) UpdateCommitmentsForBlockNumber(blockNumber int64) (done chan struct{}, errorC chan error) {
-	done = make(chan struct{})
-	errorC = make(chan error)
-
-	go func(done chan struct{}, errorC chan error) {
-		commitments, err := f.preConfClient.GetCommitmentsByBlockNumber(&bind.CallOpts{
-			Pending: false,
-			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-			Context: context.Background(),
-		}, big.NewInt(blockNumber))
-		if err != nil {
-			log.Error().Err(err).Msg("Error getting commitments")
-			errorC <- err
-			return
-		}
-		log.Info().Int("block_number", int(blockNumber)).Int("commitments", len(commitments)).Msg("Retrieved commitments")
-		for _, commitment := range commitments {
-			commitmentTxnHash, err := f.preConfClient.GetTxnHashFromCommitment(&bind.CallOpts{
-				Pending: false,
-				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-				Context: context.Background(),
-			}, commitment)
-			if err != nil {
-				log.Error().Err(err).Msg("Error getting txn hash from commitment")
-				errorC <- err
-				return
-			}
-
-			sqlStatement := `
-			INSERT INTO committed_transactions (transaction, block_number)
-			VALUES ($1, $2)`
-			result, err := f.db.Exec(sqlStatement, commitmentTxnHash, blockNumber)
-			if err != nil {
-				if err, ok := err.(*pq.Error); ok {
-					// Check if the error is a duplicate key violation
-					if err.Code.Name() == "unique_violation" {
-						log.Info().Msg("Duplicate key violation - ignoring")
-						continue
-					}
-				}
-				log.Error().Err(err).Msg("Error inserting txn into DB")
-				errorC <- err
-				return
-			}
-			rowsImpacted, err := result.RowsAffected()
-			if err != nil {
-				log.Error().Err(err).Msg("Error getting rows impacted")
-				errorC <- err
-				return
-			}
-			log.Info().Int("rows_affected", int(rowsImpacted)).Msg("Inserted txn into DB")
-		}
-		done <- struct{}{}
-	}(done, errorC)
-
-	return done, errorC
-}
-
-func (f DBTxnFilter) RetrieveCommitments(blockNumber int64) (map[string]bool, error) {
-	filter := make(map[string]bool)
-
-	rows, err := f.db.Query("SELECT transaction FROM committed_transactions WHERE block_number = $1", blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-		var txnHash string
-		err = rows.Scan(&txnHash)
-		if err != nil {
-			return nil, err
-		}
-		filter[txnHash] = true
-	}
-
-	return filter, nil
-}
-
-type InMemoryTxnFilter struct {
-	db            map[int64][]string // BlockNumber -> TxnHashes
-	preConfClient PreConfirmationsContract
-}
-
-func NewTransactionCommitmentFilter(preConfClient PreConfirmationsContract) CommitmentsStore {
-	return &InMemoryTxnFilter{
-		db:            make(map[int64][]string),
-		preConfClient: preConfClient,
-	}
-}
-
-// Reduant as InMemoryTxnFilter is not persisten
-func (f InMemoryTxnFilter) LargestStoredBlockNumber() (int64, error) {
-	var largestBlockNumber int64
-	for blockNumber := range f.db {
-		if blockNumber > largestBlockNumber {
-			largestBlockNumber = blockNumber
-		}
-	}
-	return largestBlockNumber, nil
-}
-
-func (f InMemoryTxnFilter) UpdateCommitmentsForBlockNumber(blockNumber int64) (done chan struct{}, errorC chan error) {
-	done = make(chan struct{})
-	errorC = make(chan error)
-	if _, ok := f.db[blockNumber]; !ok {
-		f.db[blockNumber] = []string{}
-	}
-
-	go func(done chan struct{}, errorC chan error) {
-		commitments, err := f.preConfClient.GetCommitmentsByBlockNumber(&bind.CallOpts{
-			Pending: false,
-			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-			Context: context.Background(),
-		}, big.NewInt(blockNumber))
-		if err != nil {
-			log.Error().Err(err).Msg("Error getting commitments")
-			errorC <- err
-			return
-		}
-
-		for _, commitment := range commitments {
-			commitmentTxnHash, err := f.preConfClient.GetTxnHashFromCommitment(&bind.CallOpts{
-				Pending: false,
-				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-				Context: context.Background(),
-			}, commitment)
-			if err != nil {
-				log.Error().Err(err).Msg("Error getting txn hash from commitment")
-				errorC <- err
-				return
-			}
-
-			f.db[blockNumber] = append(f.db[blockNumber], commitmentTxnHash)
-			// Must clear this variable
-			done <- struct{}{}
-		}
-	}(done, errorC)
-
-	return done, errorC
-}
-
-// TODO(@ckartik): Adds init filter
-// RetrieveCommitments initializes the a goroutine that will fetch all the commitments from the smart contract for the given blockNumber
-// and return a channel that will be used to filter out transactions that have already been confirmed
-// Need to model the creation of pre-confirmations from a searcher
-// NOTE: Need to manage situation where the contracts receive a commitment after the block has been updated to blockNumber
-func (f InMemoryTxnFilter) RetrieveCommitments(blockNumber int64) (filter map[string]bool, err error) {
-	filter = make(map[string]bool)
-	for _, txn := range f.db[blockNumber] {
-		filter[txn] = true
-	}
-
-	return filter, nil
+	GetLatestBlockNumber() (int64, error)
 }
 
 // SmartContractTracer is a tracer that uses the smart contract
@@ -238,7 +43,7 @@ func (f InMemoryTxnFilter) RetrieveCommitments(blockNumber int64) (filter map[st
 type IntegerationTestTracer struct {
 	contractClient           *rollupclient.Rollupclient
 	currentBlockNumberCached int64
-	cs                       CommitmentsStore
+	cs                       repository.CommitmentsStore
 
 	RateLimit time.Duration
 }
@@ -317,7 +122,7 @@ func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuil
 	return blockData, builderName, nil
 }
 
-func NewIntegrationTestTracer(ctx context.Context, contractClient *rollupclient.Rollupclient, cs CommitmentsStore) Tracer {
+func NewIntegrationTestTracer(ctx context.Context, contractClient *rollupclient.Rollupclient, cs repository.CommitmentsStore) Tracer {
 	tracer := &IntegerationTestTracer{
 		contractClient: contractClient,
 		cs:             cs,
@@ -327,27 +132,27 @@ func NewIntegrationTestTracer(ctx context.Context, contractClient *rollupclient.
 }
 
 func (st *IntegerationTestTracer) GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64) {
-	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
-		Pending: false,
-		From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-		Context: ctx,
-	})
-	for err != nil {
-		select {
-		case <-ctx.Done():
-			log.Info().Msg("Context cancelled, exiting GetNextBlockNumber")
-			return -1
-		default:
-			log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
-			time.Sleep(5 * time.Second)
-			nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
-				Pending: false,
-				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-				Context: ctx,
-			})
-		}
-	}
-	st.currentBlockNumberCached = nextBlockNumber.Int64()
+	// nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+	// 	Pending: false,
+	// 	From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+	// 	Context: ctx,
+	// })
+	// for err != nil {
+	// 	select {
+	// 	case <-ctx.Done():
+	// 		log.Info().Msg("Context cancelled, exiting GetNextBlockNumber")
+	// 		return -1
+	// 	default:
+	// 		log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
+	// 		time.Sleep(5 * time.Second)
+	// 		nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+	// 			Pending: false,
+	// 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+	// 			Context: ctx,
+	// 		})
+	// 	}
+	// }
+	st.currentBlockNumberCached += 1
 	return st.currentBlockNumberCached
 }
 
@@ -365,6 +170,7 @@ func (it *IntegerationTestTracer) RetrieveDetails() (block *BlockDetails, BlockB
 	}
 
 	for txn := range txns {
+		time.Sleep(50 * time.Millisecond)
 		blockData.Transactions = append(blockData.Transactions, txn)
 	}
 	return blockData, "dummy builder", nil
@@ -450,6 +256,10 @@ func (it *IncrementingTracer) RetrieveDetails() (block *BlockDetails, BlockBuild
 
 type MainnetInfuraAndPayloadsdeDataRetriever struct {
 	url string
+}
+
+func (st *MainnetInfuraAndPayloadsdeDataRetriever) GetLatestBlockNumber() (int64, error) {
+	return 0, errors.New("not implemented")
 }
 
 func NewMainnetInfuraAndPayloadsdeDataRetriever() L1DataRetriver {

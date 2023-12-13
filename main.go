@@ -21,6 +21,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/primevprotocol/oracle/pkg/chaintracer"
 	"github.com/primevprotocol/oracle/pkg/preconf"
+	"github.com/primevprotocol/oracle/pkg/repository"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -191,26 +192,25 @@ func run() (err error) {
 		log.Error().Err(err).Msg("Error initializing DB")
 		return
 	}
-	txnFilter := chaintracer.NewDBTxnFilter(db, pc)
+	txnStore := repository.NewDBTxnStore(db, pc)
 	time.Sleep(5 * time.Second)
 	log.Info().Msg("Sleeping to allow DB to initialize tables")
 
 	if *onlyMonitorCommitments {
-		for blockNumber, _ := txnFilter.LargestStoredBlockNumber(); ; blockNumber++ {
-			done, err := txnFilter.UpdateCommitmentsForBlockNumber(int64(blockNumber))
+		for blockNumber, _ := txnStore.LargestStoredBlockNumber(); ; blockNumber++ {
+			done, err := txnStore.UpdateCommitmentsForBlockNumber(int64(blockNumber))
 			select {
 			case <-ctx.Done():
 				log.Info().Msg("Shutting down")
 
 			case <-done:
 				log.Debug().Int64("blockNumber", blockNumber).Msg("Done updating commitments")
-				txns, err := txnFilter.RetrieveCommitments(blockNumber)
+				txns, err := txnStore.RetrieveCommitments(blockNumber)
 				if err != nil {
 					log.Error().Err(err).Msg("Error retrieving commitments")
 					return err
 				}
 				for txn := range txns {
-					time.Sleep(200 * time.Millisecond)
 					log.Info().Str("txn", txn).Msg("Txn was commited to")
 				}
 			case err := <-err:
@@ -219,7 +219,7 @@ func run() (err error) {
 		}
 
 	}
-	tracer := chaintracer.NewSmartContractTracer(rc, ctx)
+	tracer := chaintracer.NewIntegrationTestTracer(ctx, rc, txnStore)
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
 		select {
 		case <-ctx.Done():
@@ -229,7 +229,7 @@ func run() (err error) {
 			return nil
 		default:
 			log.Info().Msg("Processing")
-			err = submitBlock(ctx, blockNumber, tracer, privateKey, txnFilter)
+			err = submitBlock(ctx, blockNumber, tracer, privateKey, txnStore)
 			switch err {
 			case nil:
 			case ErrorBlockDetails:
@@ -257,22 +257,18 @@ var (
 	ErrorUnableToFilter  = errors.New("Unable to filter transactions based on commitment")
 )
 
-func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnFilter chaintracer.CommitmentsStore) (err error) {
-	doneChan, errorChan := txnFilter.UpdateCommitmentsForBlockNumber(blockNumber)
+func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnStore repository.CommitmentsStore) (err error) {
+	doneChan, errorChan := txnStore.UpdateCommitmentsForBlockNumber(blockNumber)
 	details, builder, err := tracer.RetrieveDetails()
 	if err != nil {
 		log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details")
 		return ErrorBlockDetails
 	}
-	auth, err := getAuth(privateKey, chainID, client)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to construct auth")
-		return ErrorAuth
-	}
+
 	var transactionsToPost []string
 	select {
 	case <-doneChan:
-		txnsCommitedTo, err := txnFilter.RetrieveCommitments(blockNumber)
+		txnsCommitedTo, err := txnStore.RetrieveCommitments(blockNumber)
 		if err != nil {
 			log.Error().Err(err).Msg("Error retrieving commitments")
 			return ErrorUnableToFilter
@@ -282,12 +278,22 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 				transactionsToPost = append(transactionsToPost, txn)
 			}
 		}
-		log.Info().Msg("Received data from filter")
+		log.Info().Msg("Received data from Store")
 	case err := <-errorChan:
-		log.Error().Err(err).Msg("Error from filter")
+		log.Error().Err(err).Msg("Error from Store")
 		return ErrorUnableToFilter
 	}
+	if len(transactionsToPost) == 0 {
+		log.Info().Msg("No transactions to post")
+		return nil
+	}
 	log.Debug().Str("block_number", details.BlockNumber).Msg("Posting data to settlement layer")
+	time.Sleep(12 * time.Second)
+	auth, err := getAuth(privateKey, chainID, client)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to construct auth")
+		return ErrorAuth
+	}
 	blockDataTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)
 	if err != nil {
 		log.Error().Err(err).Msg("Error posting data to settlement layer")

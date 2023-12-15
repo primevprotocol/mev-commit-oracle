@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"os/signal"
 	"time"
 
 	"database/sql"
@@ -40,6 +39,7 @@ var (
 	oracleContract         = flag.String("oracle", "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707", "Oracle contract address")
 	preConfContract        = flag.String("preconf", "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0", "Preconf contract address")
 	clientURL              = flag.String("rpc-url", "http://host.docker.internal:8545", "Client URL")
+	l1RPCURL               = flag.String("l1-rpc-url", "http://host.docker.internal:8545", "L1 Client URL")
 	privateKeyInput        = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
 	rateLimit              = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
 	startBlockNumber       = flag.Int64("startBlockNumber", 0, "Start Block Number")
@@ -48,10 +48,11 @@ var (
 	// TODO(@ckartik): Pull txns commited to from DB and post in Oracle payload.
 	integreationTestMode = flag.Bool("integrationTestMode", false, "Integration Test Mode")
 
-	client  *ethclient.Client
-	pc      *preconf.PreConfClient
-	rc      *rollupclient.Rollupclient
-	chainID *big.Int
+	client   *ethclient.Client
+	l1Client *ethclient.Client
+	pc       *preconf.PreConfClient
+	rc       *rollupclient.Rollupclient
+	chainID  *big.Int
 )
 
 func initDB() (db *sql.DB, err error) {
@@ -118,6 +119,7 @@ func init() {
 		Str("Contract Address", *oracleContract).
 		Str("Preconf Contract Address", *preConfContract).
 		Str("Client URL", *clientURL).
+		Str("L1 Client URL", *l1RPCURL).
 		Str("Private Key", "**********").
 		Int64("Rate Limit", *rateLimit).
 		Int64("Start Block Number", *startBlockNumber).
@@ -125,6 +127,12 @@ func init() {
 		Msg("Flags Parsed")
 
 	client, err = ethclient.Dial(*clientURL)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to connect to the Ethereum client")
+		os.Exit(1)
+	}
+
+	l1Client, err = ethclient.Dial(*l1RPCURL)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to connect to the Ethereum client")
 		os.Exit(1)
@@ -173,11 +181,7 @@ func main() {
 }
 
 func run() (err error) {
-	// Have some metrics for the number of events registered
-	// Handle SIGINT (CTRL+C) gracefully.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
+	ctx := context.Background()
 	// TODO(@ckartik): Move privatekey to AWS KMS
 	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
 	if err != nil {
@@ -219,32 +223,24 @@ func run() (err error) {
 		}
 
 	}
-	tracer := chaintracer.NewIntegrationTestTracer(ctx, rc, txnStore)
+	tracer := chaintracer.NewSmartContractTracer(ctx, rc, l1Client, 4887855)
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
-		select {
-		case <-ctx.Done():
-			log.Info().Msg("Shutting down")
-			// Shutdown prometehus server here TODO
-			log.Info().Msg("Shutdown complete")
-			return nil
+		log.Info().Msg("Processing")
+		err = submitBlock(ctx, blockNumber, tracer, privateKey, txnStore)
+		switch err {
+		case nil:
+		case ErrorBlockDetails:
+			log.Error().Err(err).Msg("Error retrieving block details")
+			continue
+		case ErrorAuth:
+			log.Error().Err(err).Msg("Error constructing auth")
+			continue
+		case ErrorBlockSubmission:
+			log.Error().Err(err).Msg("Error submitting block")
+			continue
 		default:
-			log.Info().Msg("Processing")
-			err = submitBlock(ctx, blockNumber, tracer, privateKey, txnStore)
-			switch err {
-			case nil:
-			case ErrorBlockDetails:
-				log.Error().Err(err).Msg("Error retrieving block details")
-				continue
-			case ErrorAuth:
-				log.Error().Err(err).Msg("Error constructing auth")
-				continue
-			case ErrorBlockSubmission:
-				log.Error().Err(err).Msg("Error submitting block")
-				continue
-			default:
-				log.Error().Err(err).Msg("Unknown error")
-				return err
-			}
+			log.Error().Err(err).Msg("Unknown error")
+			return err
 		}
 	}
 }
@@ -257,6 +253,8 @@ var (
 	ErrorUnableToFilter  = errors.New("Unable to filter transactions based on commitment")
 )
 
+// submitblock initilaizes the retreivial and storage of commitments for a block number stored on the settlmenet layer,
+// processes it with L1 block data and submits a filtered list to the settlement layer
 func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnStore repository.CommitmentsStore) (err error) {
 	doneChan, errorChan := txnStore.UpdateCommitmentsForBlockNumber(blockNumber)
 	details, builder, err := tracer.RetrieveDetails()
@@ -283,23 +281,20 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 		log.Error().Err(err).Msg("Error from Store")
 		return ErrorUnableToFilter
 	}
-	if len(transactionsToPost) == 0 {
-		log.Info().Msg("No transactions to post")
-		return nil
-	}
+
 	log.Debug().Str("block_number", details.BlockNumber).Msg("Posting data to settlement layer")
-	time.Sleep(12 * time.Second)
 	auth, err := getAuth(privateKey, chainID, client)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to construct auth")
 		return ErrorAuth
 	}
-	blockDataTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)
+
+	oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)
 	if err != nil {
 		log.Error().Err(err).Msg("Error posting data to settlement layer")
 		return ErrorBlockSubmission
 	}
 
-	log.Info().Int("data_sent_bytes", len(transactionsToPost)*32).Str("txn_hash", blockDataTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
+	log.Info().Int("commitment_transactions_posted", len(transactionsToPost)).Int("txns_filtered_out", len(details.Transactions)-len(transactionsToPost)).Str("submission_txn_hash", oracleDataPostedTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	return nil
 }

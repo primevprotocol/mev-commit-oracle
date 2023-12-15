@@ -10,6 +10,8 @@ services:
     networks:
       oracle-network:
         ipv4_address: 172.30.1.2
+    env_file:
+      - .env
     labels:
       com.datadoghq.ad.check_names: '["openmetrics"]'
       com.datadoghq.ad.init_configs: '[{}]'

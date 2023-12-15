@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math/big"
 
 	"io"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/pkg/errors"
 	"github.com/primevprotocol/oracle/pkg/repository"
 	"github.com/primevprotocol/oracle/pkg/rollupclient"
@@ -31,23 +31,6 @@ type InfuraResponse struct {
 	Result  BlockDetails `json:"result"`
 }
 
-type L1DataRetriver interface {
-	GetTransactions(blockNumber int64) (*BlockDetails, error)
-	GetWinningBuilder(blockNumber int64) (string, error)
-	GetLatestBlockNumber() (int64, error)
-}
-
-// SmartContractTracer is a tracer that uses the smart contract
-// to retrieve details about the next block that needs to be proccesed
-// it has the option of
-type IntegerationTestTracer struct {
-	contractClient           *rollupclient.Rollupclient
-	currentBlockNumberCached int64
-	cs                       repository.CommitmentsStore
-
-	RateLimit time.Duration
-}
-
 // SmartContractTracer is a tracer that uses the smart contract
 // to retrieve details about the next block that needs to be proccesed
 // it has the option of
@@ -55,83 +38,18 @@ type SmartContractTracer struct {
 	contractClient           *rollupclient.Rollupclient
 	currentBlockNumberCached int64
 
-	RateLimit time.Duration
+	RateLimit           time.Duration
+	startingBlockNumber int64
+	L1Client            *ethclient.Client
 }
 
 func (st *SmartContractTracer) GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64) {
-	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
-		Pending: false,
-		From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-		Context: ctx,
-	})
-	for err != nil {
-		select {
-		case <-ctx.Done():
-			log.Info().Msg("Context cancelled, exiting GetNextBlockNumber")
-			return -1
-		default:
-			log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
-			time.Sleep(5 * time.Second)
-			nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
-				Pending: false,
-				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-				Context: ctx,
-			})
-		}
-	}
-	st.currentBlockNumberCached = nextBlockNumber.Int64()
-	return st.currentBlockNumberCached
-}
+	if st.currentBlockNumberCached < st.startingBlockNumber {
+		st.currentBlockNumberCached = st.startingBlockNumber
 
-// TODO(@ckartik): Move logic for service based data request to an isolated function.
-func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
-	retries := 0
-	var blockData *BlockDetails
-	log.Debug().Msg("Starting Retreival of Block Details")
-	// Retrieve Block Details from Infura
-	for blockData == nil {
-		log.Debug().Msg("fetching infura data")
-		blockData = InfuraData(st.currentBlockNumberCached, "https://mainnet.infura.io/v3/b8877b173a0543bea7dca82c313e7347")
-		time.Sleep(time.Duration(retries*5) * time.Second)
-		if retries > 5 {
-			log.Error().Msg("Error: Could not retrieve block data")
-			return nil, "", errors.New("Error: Could not retrieve block data")
-		}
-		retries += 1
+		return st.currentBlockNumberCached
 	}
-	retries = 0
-	var builderName string
-	for builderName == "" {
-		log.Debug().Msg("fetching Payloadsde data")
-		builderName, err = PayloadsDe(st.currentBlockNumberCached)
-		if err != nil {
-			log.Error().Err(err).Msg("Error: Could not retrieve block data")
-		}
-		time.Sleep(time.Duration(retries*5) * time.Second)
-		if retries > 5 {
-			return nil, "", errors.New("Error: Could not retrieve block data")
-		}
-		retries += 1
-	}
-	log.Info().
-		Int64("BlockNumber", st.currentBlockNumberCached).
-		Str("Builder", builderName).
-		Int("Txns Received", len(blockData.Transactions)).
-		Msg("Finished Retreival of Block Details")
 
-	return blockData, builderName, nil
-}
-
-func NewIntegrationTestTracer(ctx context.Context, contractClient *rollupclient.Rollupclient, cs repository.CommitmentsStore) Tracer {
-	tracer := &IntegerationTestTracer{
-		contractClient: contractClient,
-		cs:             cs,
-	}
-	tracer.GetNextBlockNumber(ctx)
-	return tracer
-}
-
-func (st *IntegerationTestTracer) GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64) {
 	// nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
 	// 	Pending: false,
 	// 	From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
@@ -147,43 +65,78 @@ func (st *IntegerationTestTracer) GetNextBlockNumber(ctx context.Context) (NewBl
 	// 		time.Sleep(5 * time.Second)
 	// 		nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
 	// 			Pending: false,
-	// 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+	// 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"), // TODO(@ckartik): See how we can remove this
 	// 			Context: ctx,
 	// 		})
 	// 	}
 	// }
-	st.currentBlockNumberCached += 1
+	st.currentBlockNumberCached = st.currentBlockNumberCached + 1
+
 	return st.currentBlockNumberCached
 }
 
 // TODO(@ckartik): Move logic for service based data request to an isolated function.
-func (it *IntegerationTestTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
-	txns, err := it.cs.RetrieveCommitments(it.currentBlockNumberCached)
+func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
+	l1BlockNumber, err := st.L1Client.BlockNumber(context.Background())
 	if err != nil {
-		log.Error().Err(err).Msg("Error retrieving txns in integreation test tracer")
+		log.Error().Err(err).Msg("Error getting block number")
 		return nil, "", err
 	}
+	// Make fast mode flexible
+	if l1BlockNumber > uint64(st.currentBlockNumberCached+4) {
+		log.Info().Uint64("l1_block_number", l1BlockNumber).Int64("current_oracle_block", st.currentBlockNumberCached).Msg("Fast Mode")
+		time.Sleep(2 * time.Second)
+	} else {
+		log.Info().Uint64("l1_block_number", l1BlockNumber).Int64("current_oracle_block", st.currentBlockNumberCached).Msg("Normal Mode")
+		time.Sleep(12 * time.Second)
+	}
 
+	log.Debug().Msg("Starting Retreival of Block Details")
+	L1Block, err := st.L1Client.BlockByNumber(context.Background(), big.NewInt(st.currentBlockNumberCached))
+
+	// Retrieve Block Details from Infura
+	for retries := 0; err != nil; retries++ {
+		log.Debug().Msg("Failed to get block from L1, will try again")
+		time.Sleep(time.Duration(retries*5) * time.Second)
+		if retries > 5 {
+			log.Error().Msg("Error: Could not retrieve block data")
+			return nil, "", errors.New("Error: Could not retrieve block data")
+		}
+		L1Block, err = st.L1Client.BlockByNumber(context.Background(), big.NewInt(st.currentBlockNumberCached))
+	}
 	blockData := &BlockDetails{
-		BlockNumber:  strconv.FormatInt(it.currentBlockNumberCached, 10),
+		BlockNumber:  strconv.FormatInt(st.currentBlockNumberCached, 10),
 		Transactions: []string{},
 	}
 
-	for txn := range txns {
-		time.Sleep(50 * time.Millisecond)
-		blockData.Transactions = append(blockData.Transactions, txn)
+	txns := L1Block.Transactions()
+	for _, txn := range txns {
+		blockData.Transactions = append(blockData.Transactions, txn.Hash().String())
 	}
-	return blockData, "dummy builder", nil
+
+	return blockData, string(L1Block.Header().Extra), nil
 }
 
-func NewSmartContractTracer(contractClient *rollupclient.Rollupclient, ctx context.Context) Tracer {
+func NewSmartContractTracer(ctx context.Context, contractClient *rollupclient.Rollupclient, l1Client *ethclient.Client, startingBlockNumber int64) Tracer {
 	tracer := &SmartContractTracer{
-		contractClient: contractClient,
+		contractClient:      contractClient,
+		startingBlockNumber: startingBlockNumber,
+		L1Client:            l1Client,
 	}
-	tracer.GetNextBlockNumber(ctx)
+
 	return tracer
 
 }
+
+/*
+Redundant Testing Code Begins here
+*/
+type L1DataRetriver interface {
+	GetTransactions(blockNumber int64) (*BlockDetails, error)
+	GetWinningBuilder(blockNumber int64) (string, error)
+	GetLatestBlockNumber() (int64, error)
+}
+
 func NewIncrementingTracer(startingBlockNumber int64, rateLimit time.Duration) Tracer {
 	return &IncrementingTracer{
 		BlockNumber: startingBlockNumber,
@@ -346,4 +299,69 @@ func InfuraData(blockNumber int64, url string) *BlockDetails {
 		return nil
 	}
 	return &infuraresp.Result
+}
+
+func NewIntegrationTestTracer(ctx context.Context, contractClient *rollupclient.Rollupclient, cs repository.CommitmentsStore) Tracer {
+	tracer := &IntegerationTestTracer{
+		contractClient: contractClient,
+		cs:             cs,
+	}
+	tracer.GetNextBlockNumber(ctx)
+	return tracer
+}
+
+func (st *IntegerationTestTracer) GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64) {
+	// nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+	// 	Pending: false,
+	// 	From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+	// 	Context: ctx,
+	// })
+	// for err != nil {
+	// 	select {
+	// 	case <-ctx.Done():
+	// 		log.Info().Msg("Context cancelled, exiting GetNextBlockNumber")
+	// 		return -1
+	// 	default:
+	// 		log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
+	// 		time.Sleep(5 * time.Second)
+	// 		nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+	// 			Pending: false,
+	// 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+	// 			Context: ctx,
+	// 		})
+	// 	}
+	// }
+	st.currentBlockNumberCached += 1
+	return st.currentBlockNumberCached
+}
+
+// TODO(@ckartik): Move logic for service based data request to an isolated function.
+func (it *IntegerationTestTracer) RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error) {
+	txns, err := it.cs.RetrieveCommitments(it.currentBlockNumberCached)
+	if err != nil {
+		log.Error().Err(err).Msg("Error retrieving txns in integreation test tracer")
+		return nil, "", err
+	}
+
+	blockData := &BlockDetails{
+		BlockNumber:  strconv.FormatInt(it.currentBlockNumberCached, 10),
+		Transactions: []string{},
+	}
+
+	for txn := range txns {
+		time.Sleep(50 * time.Millisecond)
+		blockData.Transactions = append(blockData.Transactions, txn)
+	}
+	return blockData, "dummy builder", nil
+}
+
+// IntegerationTestTracer is a tracer that uses the smart contract
+// to retrieve details about the next block that needs to be proccesed
+// it has the option of
+type IntegerationTestTracer struct {
+	contractClient           *rollupclient.Rollupclient
+	currentBlockNumberCached int64
+	cs                       repository.CommitmentsStore
+
+	RateLimit time.Duration
 }

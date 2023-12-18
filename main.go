@@ -28,9 +28,10 @@ import (
 
 // DB Setup
 const (
-	host     = "172.30.1.3"
-	port     = 5432          // Default port for PostgreSQL
-	user     = "oracle_user" // Your database user
+	host = "172.30.1.3"
+	port = 5432          // Default port for PostgreSQL
+	user = "oracle_user" // Your database user
+	//  TODO(@ckartik): Move to KMS or env
 	password = "oracle_pass" // Your database password
 	dbname   = "oracle_db"   // Your database name
 )
@@ -200,7 +201,6 @@ func run() (err error) {
 			}
 		}
 	}
-	// txnFilter := chaintracer.NewTransactionCommitmentFilter(pc)
 
 	db, err := initDB()
 	if err != nil {

@@ -14,6 +14,6 @@ COPY --from=builder /app/mev-oracle /mev-oracle
 COPY --from=builder /app/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 13522 13523 13524
+EXPOSE 13522 13523 13524 8080
 
 ENTRYPOINT ["/entrypoint.sh"]

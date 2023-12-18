@@ -156,16 +156,17 @@ func init() {
 		os.Exit(1)
 	}
 	log.Debug().Str("Chain ID", chainID.String()).Msg("Chain ID Detected")
+
 }
 
-func SetBuilderMapping(pk *ecdsa.PrivateKey, builderName string, builderAddress common.Address) (txnHash string, err error) {
+func SetBuilderMapping(pk *ecdsa.PrivateKey, builderName string, builderAddress string) (txnHash string, err error) {
 	auth, err := getAuth(pk, chainID, client)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to construct auth")
 		return
 	}
 
-	txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x15766e4fC283Bb52C5c470648AeA2b5Ad133410a"))
+	txn, err := rc.AddBuilderAddress(auth, builderName, common.HexToAddress(builderAddress))
 	if err != nil {
 		log.Error().Err(err).Msg("Error adding builder address")
 		return "", err
@@ -189,6 +190,16 @@ func run() (err error) {
 		return
 	}
 
+	if *integreationTestMode {
+		log.Info().Msg("Integration Test Mode Enabled. Setting fake builder mapping")
+		for _, builder := range integrationTestBuilders {
+			_, err = SetBuilderMapping(privateKey, builder, builder)
+			if err != nil {
+				log.Error().Err(err).Msg("Error setting builder mapping")
+				return
+			}
+		}
+	}
 	// txnFilter := chaintracer.NewTransactionCommitmentFilter(pc)
 
 	db, err := initDB()
@@ -253,6 +264,17 @@ var (
 	ErrorUnableToFilter  = errors.New("Unable to filter transactions based on commitment")
 )
 
+var integrationTestBuilders = []string{
+	"0x48ddC642514370bdaFAd81C91e23759B0302C915",
+	"0x972eb4Fc3c457da4C957306bE7Fa1976BB8F39A6",
+	"0xA1e8FDB3bb6A0DB7aA5Db49a3512B01671686DCB",
+	"0xB9286CB4782E43A202BfD426AbB72c8cb34f886c",
+	"0xdaa1EEe546fc3f2d10C348d7fEfACE727C1dfa5B",
+	"0x93DC0b6A7F454Dd10373f1BdA7Fe80BB549EE2F9",
+	"0x426184Df456375BFfE7f53FdaF5cB48DeB3bbBE9",
+	"0x41cC09BD5a97F22045fe433f1AF0B07d0AB28F58",
+}
+
 // submitblock initilaizes the retreivial and storage of commitments for a block number stored on the settlmenet layer,
 // processes it with L1 block data and submits a filtered list to the settlement layer
 func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnStore repository.CommitmentsStore) (err error) {
@@ -287,6 +309,10 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to construct auth")
 		return ErrorAuth
+	}
+
+	if *integreationTestMode {
+		builder = integrationTestBuilders[blockNumber%int64(len(integrationTestBuilders))]
 	}
 
 	oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)

@@ -223,7 +223,7 @@ func run() (err error) {
 		}
 
 	}
-	tracer := chaintracer.NewSmartContractTracer(ctx, rc, l1Client, 4887855)
+	tracer := chaintracer.NewSmartContractTracer(ctx, rc, l1Client, *startBlockNumber)
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
 		log.Info().Msg("Processing")
 		err = submitBlock(ctx, blockNumber, tracer, privateKey, txnStore)

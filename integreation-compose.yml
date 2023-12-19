@@ -1,0 +1,50 @@
+
+version: '3.8'
+
+services:
+  oracle:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    restart: always
+    networks:
+      - primev_net
+    env_file:
+      - .env
+    labels:
+      com.datadoghq.ad.check_names: '["openmetrics"]'
+      com.datadoghq.ad.init_configs: '[{}]'
+      com.datadoghq.ad.instances: |
+        [
+          {
+            "openmetrics_endpoint": "http://%%host%%:13523/metrics",
+            "namespace": "oracle",
+            "metrics": [
+              "oracle_metrics*",
+            ]
+          }
+        ]
+    depends_on:
+      - oracle-db
+
+  oracle-db:
+    image: postgres:latest
+    restart: always
+    environment:
+      POSTGRES_DB: oracle_db
+      POSTGRES_USER: oracle_user
+      POSTGRES_PASSWORD: oracle_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d
+    networks:
+      - primev_net
+
+networks:
+  primev_net:
+    external: true
+
+volumes:
+  postgres_data:

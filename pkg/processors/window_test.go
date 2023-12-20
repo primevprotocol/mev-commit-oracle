@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/primevprotocol/oracle/pkg/chaintracer"
-	"github.com/primevprotocol/oracle/pkg/processors"
+	"github.com/primevprotocol/mev-oracle/pkg/chaintracer"
+	"github.com/primevprotocol/mev-oracle/pkg/processors"
 )
 
 func TestProcessBlock(t *testing.T) {

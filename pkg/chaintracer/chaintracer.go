@@ -9,7 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/pkg/errors"
-	"github.com/primevprotocol/oracle/pkg/rollupclient"
+	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
 )
 

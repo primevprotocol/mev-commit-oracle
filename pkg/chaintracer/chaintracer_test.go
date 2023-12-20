@@ -14,8 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	repository "github.com/primevprotocol/oracle/pkg/Repository"
-	"github.com/primevprotocol/oracle/pkg/chaintracer"
+	repository "github.com/primevprotocol/mev-oracle/pkg/Repository"
+	"github.com/primevprotocol/mev-oracle/pkg/chaintracer"
 	"github.com/stretchr/testify/assert"
 )
 

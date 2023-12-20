@@ -18,21 +18,21 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/primevprotocol/oracle/pkg/chaintracer"
-	"github.com/primevprotocol/oracle/pkg/preconf"
-	"github.com/primevprotocol/oracle/pkg/repository"
-	"github.com/primevprotocol/oracle/pkg/rollupclient"
+	"github.com/primevprotocol/mev-oracle/pkg/chaintracer"
+	"github.com/primevprotocol/mev-oracle/pkg/preconf"
+	"github.com/primevprotocol/mev-oracle/pkg/repository"
+	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 // DB Setup
 const (
-	host     = "172.30.1.3"
-	port     = 5432          // Default port for PostgreSQL
-	user     = "oracle_user" // Your database user
-	password = "oracle_pass" // Your database password
-	dbname   = "oracle_db"   // Your database name
+	port = 5432          // Default port for PostgreSQL
+	user = "oracle_user" // Your database user
+	//  TODO(@ckartik): Move to KMS or env
+	// password = "oracle_pass" // Your database password
+	dbname = "oracle_db" // Your database name
 )
 
 var (
@@ -44,6 +44,10 @@ var (
 	rateLimit              = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
 	startBlockNumber       = flag.Int64("startBlockNumber", 0, "Start Block Number")
 	onlyMonitorCommitments = flag.Bool("onlyMonitorCommitments", false, "Only monitor commitments")
+	dbHost                 = flag.String("dbHost", "oracle-db", "DB Host")
+	fastModeSleep          = flag.Int64("fastModeSleep", 2, "Sleep time in fast mode between data retrievials from RPC Ethereum Client")
+	normalModeSleep        = flag.Int64("normalModeSleep", 12, "Sleep time in normal mode between data retrievials from RPC Ethereum Client")
+	fastModeSensitivity    = flag.Int64("fastModeSensitivity", 2, "Number of blocks to be behind before fast mode is triggered")
 
 	// TODO(@ckartik): Pull txns commited to from DB and post in Oracle payload.
 	integreationTestMode = flag.Bool("integrationTestMode", false, "Integration Test Mode")
@@ -55,23 +59,27 @@ var (
 	chainID  *big.Int
 )
 
+// Can't unittest if this isn't an interface
+// Need to keep interfaces for 3rd party driveres, so you can mock for unit tests
 func initDB() (db *sql.DB, err error) {
+
+	password := os.Getenv("POSTGRES_PASSWORD")
+
 	// Connection string
 	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
 		"password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname)
+		*dbHost, port, user, password, dbname)
 
 	// Open a connection
 	db, err = sql.Open("postgres", psqlInfo)
 	if err != nil {
-		log.Error().Err(err).Msg("Error opening DB")
 		return nil, err
 	}
 
 	// Check the connection
 	err = db.Ping()
 	if err != nil {
-		log.Error().Err(err).Msg("Error pinging DB")
+		return nil, err
 	}
 
 	return db, err
@@ -81,13 +89,11 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 	// Set transaction opts
 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to construct auth")
 		return nil, err
 	}
 	// Set nonce (optional)
 	nonce, err := client.PendingNonceAt(context.Background(), auth.From)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get nonce")
 		return nil, err
 	}
 	auth.Nonce = big.NewInt(int64(nonce))
@@ -95,7 +101,6 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 	// Set gas price (optional)
 	gasPrice, err := client.SuggestGasPrice(context.Background())
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get gas price")
 		return nil, err
 	}
 	auth.GasPrice = gasPrice
@@ -126,48 +131,44 @@ func init() {
 		Bool("Only Monitor Commitments", *onlyMonitorCommitments).
 		Msg("Flags Parsed")
 
+	// Harder to tests with ethclient
+	// it has ethclient.rpcclient
 	client, err = ethclient.Dial(*clientURL)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to connect to the Ethereum client")
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("Failed to connect to the Settlement Layer client")
 	}
 
 	l1Client, err = ethclient.Dial(*l1RPCURL)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to connect to the Ethereum client")
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("Failed to connect to the L1 Ethereum client")
 	}
 
 	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*oracleContract), client)
 	if err != nil {
-		log.Error().Err(err).Msg("Error creating oracle client")
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("Error creating oracle client")
 	}
 
 	pc, err = preconf.NewPreConfClient(common.HexToAddress(*preConfContract), client)
 	if err != nil {
-		log.Error().Err(err).Msg("Error creating preconf client")
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("Error creating preconf client")
 	}
 
 	chainID, err = client.ChainID(context.Background())
 	if err != nil {
-		log.Error().Err(err).Msg("Error getting chain ID")
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("Error getting chain ID")
 	}
 	log.Debug().Str("Chain ID", chainID.String()).Msg("Chain ID Detected")
+
 }
 
-func SetBuilderMapping(pk *ecdsa.PrivateKey, builderName string, builderAddress common.Address) (txnHash string, err error) {
+func SetBuilderMapping(pk *ecdsa.PrivateKey, builderName string, builderAddress string) (txnHash string, err error) {
 	auth, err := getAuth(pk, chainID, client)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to construct auth")
-		return
+		return "", err
 	}
 
-	txn, err := rc.AddBuilderAddress(auth, "k builder", common.HexToAddress("0x15766e4fC283Bb52C5c470648AeA2b5Ad133410a"))
+	txn, err := rc.AddBuilderAddress(auth, builderName, common.HexToAddress(builderAddress))
 	if err != nil {
-		log.Error().Err(err).Msg("Error adding builder address")
 		return "", err
 	}
 
@@ -189,7 +190,16 @@ func run() (err error) {
 		return
 	}
 
-	// txnFilter := chaintracer.NewTransactionCommitmentFilter(pc)
+	if *integreationTestMode {
+		log.Info().Msg("Integration Test Mode Enabled. Setting fake builder mapping")
+		for _, builder := range integrationTestBuilders {
+			_, err = SetBuilderMapping(privateKey, builder, builder)
+			if err != nil {
+				log.Error().Err(err).Msg("Error setting builder mapping")
+				return
+			}
+		}
+	}
 
 	db, err := initDB()
 	if err != nil {
@@ -223,11 +233,11 @@ func run() (err error) {
 		}
 
 	}
-	tracer := chaintracer.NewSmartContractTracer(ctx, rc, l1Client, 4887855)
+	tracer := chaintracer.NewSmartContractTracer(ctx, rc, l1Client, *startBlockNumber)
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
 		log.Info().Msg("Processing")
 		err = submitBlock(ctx, blockNumber, tracer, privateKey, txnStore)
-		switch err {
+		switch err { // Should be a different approach to make things cleaner
 		case nil:
 		case ErrorBlockDetails:
 			log.Error().Err(err).Msg("Error retrieving block details")
@@ -253,14 +263,24 @@ var (
 	ErrorUnableToFilter  = errors.New("Unable to filter transactions based on commitment")
 )
 
+var integrationTestBuilders = []string{
+	"0x48ddC642514370bdaFAd81C91e23759B0302C915",
+	"0x972eb4Fc3c457da4C957306bE7Fa1976BB8F39A6",
+	"0xA1e8FDB3bb6A0DB7aA5Db49a3512B01671686DCB",
+	"0xB9286CB4782E43A202BfD426AbB72c8cb34f886c",
+	"0xdaa1EEe546fc3f2d10C348d7fEfACE727C1dfa5B",
+	"0x93DC0b6A7F454Dd10373f1BdA7Fe80BB549EE2F9",
+	"0x426184Df456375BFfE7f53FdaF5cB48DeB3bbBE9",
+	"0x41cC09BD5a97F22045fe433f1AF0B07d0AB28F58",
+}
+
 // submitblock initilaizes the retreivial and storage of commitments for a block number stored on the settlmenet layer,
 // processes it with L1 block data and submits a filtered list to the settlement layer
-func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnStore repository.CommitmentsStore) (err error) {
+func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnStore repository.CommitmentsStore) error {
 	doneChan, errorChan := txnStore.UpdateCommitmentsForBlockNumber(blockNumber)
 	details, builder, err := tracer.RetrieveDetails()
 	if err != nil {
-		log.Error().Int64("block_number", blockNumber).Err(err).Msg("Error retrieving block details")
-		return ErrorBlockDetails
+		return fmt.Errorf("%w: %v", ErrorBlockDetails, err)
 	}
 
 	var transactionsToPost []string
@@ -268,7 +288,6 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 	case <-doneChan:
 		txnsCommitedTo, err := txnStore.RetrieveCommitments(blockNumber)
 		if err != nil {
-			log.Error().Err(err).Msg("Error retrieving commitments")
 			return ErrorUnableToFilter
 		}
 		for _, txn := range details.Transactions {
@@ -278,15 +297,20 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 		}
 		log.Info().Msg("Received data from Store")
 	case err := <-errorChan:
-		log.Error().Err(err).Msg("Error from Store")
-		return ErrorUnableToFilter
+		return fmt.Errorf("%w: %v", ErrorUnableToFilter, err)
 	}
 
 	log.Debug().Str("block_number", details.BlockNumber).Msg("Posting data to settlement layer")
 	auth, err := getAuth(privateKey, chainID, client)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to construct auth")
-		return ErrorAuth
+		return fmt.Errorf("%w: %v", ErrorAuth, err)
+	}
+
+	// Have an integreation compose
+	// When you have a true false branching, there is something wrong
+	// It's not a useful flag
+	if *integreationTestMode {
+		builder = integrationTestBuilders[blockNumber%int64(len(integrationTestBuilders))]
 	}
 
 	oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)

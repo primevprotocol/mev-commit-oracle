@@ -5,6 +5,6 @@
 
 # Start the mev-oracle application
 # Replace this with the actual command to start your application
-./mev-oracle --rpc-url http://host.docker.internal:8545 --l1-rpc-url ${L1_URL}
+./mev-oracle --rpc-url http://host.docker.internal:8545 --l1-rpc-url ${L1_URL} --startBlockNumber ${STARTING_BLOCK} --integrationTestMode ${INTEGREATION_TEST}
 
 # Optional: Additional commands for logging or error handling can go here

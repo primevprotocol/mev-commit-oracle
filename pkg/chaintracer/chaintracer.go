@@ -9,7 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/pkg/errors"
-	"github.com/primevprotocol/oracle/pkg/rollupclient"
+	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
 )
 
@@ -79,6 +79,7 @@ func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuil
 		return nil, "", err
 	}
 	// Make fast mode flexible
+	// no hardcoded variables
 	if l1BlockNumber > uint64(st.currentBlockNumberCached+4) {
 		log.Info().Uint64("l1_block_number", l1BlockNumber).Int64("current_oracle_block", st.currentBlockNumberCached).Msg("Fast Mode")
 		time.Sleep(2 * time.Second)
@@ -92,10 +93,13 @@ func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuil
 
 	// Retrieve Block Details from Infura
 	for retries := 0; err != nil; retries++ {
+		// The err is being printed here.
 		log.Debug().Msg("Failed to get block from L1, will try again")
 		time.Sleep(time.Duration(retries*5) * time.Second)
 		if retries > 5 {
-			log.Error().Msg("Error: Could not retrieve block data")
+			// Logging and returning is a bad pattern. Log in only one location
+			// log.Error().Msg("Error: Could not retrieve block data")
+			// Creating a new error but not printing
 			return nil, "", errors.New("Error: Could not retrieve block data")
 		}
 		L1Block, err = st.L1Client.BlockByNumber(context.Background(), big.NewInt(st.currentBlockNumberCached))

@@ -3,7 +3,7 @@ package processors
 import (
 	"errors"
 
-	"github.com/primevprotocol/oracle/pkg/chaintracer"
+	"github.com/primevprotocol/mev-oracle/pkg/chaintracer"
 )
 
 type BidSet map[string]struct{}

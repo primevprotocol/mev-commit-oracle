@@ -1,4 +1,4 @@
-module github.com/primevprotocol/oracle
+module github.com/primevprotocol/mev-oracle
 
 go 1.21.1
 

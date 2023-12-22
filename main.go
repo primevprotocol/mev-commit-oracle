@@ -38,7 +38,7 @@ const (
 var (
 	oracleContract         = flag.String("oracle", "0x628F330Ae673df7D73d943f9590A4d643e4197f6", "Oracle contract address")
 	preConfContract        = flag.String("preconf", "0x8B0F623dCD54cA50CD154B3dDCbB8436E876b019", "Preconf contract address")
-	clientURL              = flag.String("rpc-url", "http://host.docker.internal:8545", "Client URL")
+	clientURL              = flag.String("rpc-url", "http://sl-bootnode:8545", "Client URL")
 	l1RPCURL               = flag.String("l1-rpc-url", "http://host.docker.internal:8545", "L1 Client URL")
 	privateKeyInput        = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
 	rateLimit              = flag.Int64("rateLimit", 12, "Rate Limit in seconds")

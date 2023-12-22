@@ -133,6 +133,7 @@ func init() {
 
 	// Harder to tests with ethclient
 	// it has ethclient.rpcclient
+	// TODO(@ckartik): Name this settlement layer client
 	client, err = ethclient.Dial(*clientURL)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to the Settlement Layer client")
@@ -143,6 +144,8 @@ func init() {
 		log.Fatal().Err(err).Msg("Failed to connect to the L1 Ethereum client")
 	}
 
+	// TODO(@ckartik): Move generated code to a seperate gen package
+	// TODO(@ckartik) Rename to oracle client
 	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*oracleContract), client)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error creating oracle client")
@@ -161,6 +164,14 @@ func init() {
 
 }
 
+/*
+L1 block = [txn txn txn extra data]
+extra data = block builder identity
+
+we're pulling real l1 data, but we want to fake the blocks
+*/
+
+// TODO(@ckartik): This can be done in the builder emulator, similar to staking so we should do in one place
 func SetBuilderMapping(pk *ecdsa.PrivateKey, builderName string, builderAddress string) (txnHash string, err error) {
 	auth, err := getAuth(pk, chainID, client)
 	if err != nil {
@@ -190,6 +201,7 @@ func run() (err error) {
 		return
 	}
 
+	// TODO(@ckartik): This get's moved to the builder emulator
 	if *integreationTestMode {
 		log.Info().Msg("Integration Test Mode Enabled. Setting fake builder mapping")
 		for _, builder := range integrationTestBuilders {
@@ -309,6 +321,7 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 	// Have an integreation compose
 	// When you have a true false branching, there is something wrong
 	// It's not a useful flag
+	// TODO(@ckartik): This can be moved to the tracer
 	if *integreationTestMode {
 		builder = integrationTestBuilders[blockNumber%int64(len(integrationTestBuilders))]
 	}

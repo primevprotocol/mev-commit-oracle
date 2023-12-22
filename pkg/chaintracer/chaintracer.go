@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/pkg/errors"
 	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
@@ -46,27 +48,21 @@ func (st *SmartContractTracer) GetNextBlockNumber(ctx context.Context) (NewBlock
 	}
 
 	// TODO(@ckartik): Use stored block number on contract instead of incrementing (For Failure reslience)
-	// nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
-	// 	Pending: false,
-	// 	From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-	// 	Context: ctx,
-	// })
-	// for err != nil {
-	// 	select {
-	// 	case <-ctx.Done():
-	// 		log.Info().Msg("Context cancelled, exiting GetNextBlockNumber")
-	// 		return -1
-	// 	default:
-	// 		log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
-	// 		time.Sleep(5 * time.Second)
-	// 		nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
-	// 			Pending: false,
-	// 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"), // TODO(@ckartik): See how we can remove this
-	// 			Context: ctx,
-	// 		})
-	// 	}
-	// }
-	st.currentBlockNumberCached = st.currentBlockNumberCached + 1
+	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+		Pending: false,
+		From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+		Context: ctx,
+	})
+	for err != nil {
+		log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
+		time.Sleep(5 * time.Second)
+		nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+			Pending: false,
+			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"), // TODO(@ckartik): See how we can remove this
+			Context: ctx,
+		})
+	}
+	st.currentBlockNumberCached = nextBlockNumber.Int64()
 
 	return st.currentBlockNumberCached
 }

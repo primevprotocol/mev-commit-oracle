@@ -69,13 +69,20 @@ func (st *SmartContractTracer) GetNextBlockNumber(ctx context.Context) (NewBlock
 			})
 		}
 	}
-	st.currentBlockNumberCached = nextBlockNumber.Int64()
-	if nextBlockNumber.Int64() < st.startingBlockNumber {
+
+	if st.currentBlockNumberCached < nextBlockNumber.Int64() {
+		st.currentBlockNumberCached = nextBlockNumber.Int64()
+	}
+	if st.currentBlockNumberCached < st.startingBlockNumber {
 		log.Info().Int64("next_block_number", nextBlockNumber.Int64()).Int64("starting_block_number", st.startingBlockNumber).Msg("Next block number is less than starting block number, returning starting block number")
 		st.currentBlockNumberCached = st.startingBlockNumber
 	}
 
 	return st.currentBlockNumberCached
+}
+
+func (st *SmartContractTracer) IncrementBlockNumber() {
+	st.currentBlockNumberCached++
 }
 
 // TODO(@ckartik): Move logic for service based data request to an isolated function.
@@ -156,6 +163,7 @@ type L1DataRetriver interface {
 type Tracer interface {
 	GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64)
 	RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error)
+	IncrementBlockNumber()
 }
 
 type Payload struct {

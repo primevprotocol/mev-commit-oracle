@@ -249,12 +249,14 @@ func run() (err error) {
 		case nil:
 		case ErrorBlockDetails:
 			log.Error().Err(err).Msg("Error retrieving block details")
+			tracer.IncrementBlockNumber()
 			continue
 		case ErrorAuth:
 			log.Error().Err(err).Msg("Error constructing auth")
 			continue
 		case ErrorBlockSubmission:
 			log.Error().Err(err).Msg("Error submitting block")
+			tracer.IncrementBlockNumber()
 			continue
 		default:
 			log.Error().Err(err).Msg("Unknown error")
@@ -323,7 +325,6 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 
 	oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)
 	if err != nil {
-		log.Error().Err(err).Msg("Error posting data to settlement layer")
 		return ErrorBlockSubmission
 	}
 

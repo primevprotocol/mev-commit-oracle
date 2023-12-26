@@ -36,8 +36,8 @@ const (
 )
 
 var (
-	oracleContract         = flag.String("oracle", "0x14Db3Bd56D16e315150B3d5bfE5ee1FCb04CE905", "Oracle contract address")
-	preConfContract        = flag.String("preconf", "0x8B0F623dCD54cA50CD154B3dDCbB8436E876b019", "Preconf contract address")
+	oracleContract         = flag.String("oracle", "0x51dcB14bcb0B4eE747BE445550A4Fb53ecd31617", "Oracle contract address")
+	preConfContract        = flag.String("preconf", "0xBB632720f817792578060F176694D8f7230229d9", "Preconf contract address")
 	clientURL              = flag.String("rpc-url", "http://sl-bootnode:8545", "Client URL")
 	l1RPCURL               = flag.String("l1-rpc-url", "http://host.docker.internal:8545", "L1 Client URL")
 	privateKeyInput        = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
@@ -54,7 +54,7 @@ var (
 
 	client   *ethclient.Client
 	l1Client *ethclient.Client
-	pc       *preconf.PreConfClient
+	pc       *preconf.Preconf
 	rc       *rollupclient.Rollupclient
 	chainID  *big.Int
 )
@@ -148,7 +148,7 @@ func init() {
 		log.Fatal().Err(err).Msg("Error creating oracle client")
 	}
 
-	pc, err = preconf.NewPreConfClient(common.HexToAddress(*preConfContract), client)
+	pc, err = preconf.NewPreconf(common.HexToAddress(*preConfContract), client)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error creating preconf client")
 	}

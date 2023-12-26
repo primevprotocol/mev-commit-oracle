@@ -36,7 +36,7 @@ const (
 )
 
 var (
-	oracleContract         = flag.String("oracle", "0x628F330Ae673df7D73d943f9590A4d643e4197f6", "Oracle contract address")
+	oracleContract         = flag.String("oracle", "0x14Db3Bd56D16e315150B3d5bfE5ee1FCb04CE905", "Oracle contract address")
 	preConfContract        = flag.String("preconf", "0x8B0F623dCD54cA50CD154B3dDCbB8436E876b019", "Preconf contract address")
 	clientURL              = flag.String("rpc-url", "http://sl-bootnode:8545", "Client URL")
 	l1RPCURL               = flag.String("l1-rpc-url", "http://host.docker.internal:8545", "L1 Client URL")
@@ -45,9 +45,9 @@ var (
 	startBlockNumber       = flag.Int64("startBlockNumber", 0, "Start Block Number")
 	onlyMonitorCommitments = flag.Bool("onlyMonitorCommitments", false, "Only monitor commitments")
 	dbHost                 = flag.String("dbHost", "oracle-db", "DB Host")
-	fastModeSleep          = flag.Int64("fastModeSleep", 2, "Sleep time in fast mode between data retrievials from RPC Ethereum Client")
+	fastModeSleep          = flag.Int64("fastModeSleep", 5, "Sleep time in fast mode between data retrievials from RPC Ethereum Client")
 	normalModeSleep        = flag.Int64("normalModeSleep", 12, "Sleep time in normal mode between data retrievials from RPC Ethereum Client")
-	fastModeSensitivity    = flag.Int64("fastModeSensitivity", 2, "Number of blocks to be behind before fast mode is triggered")
+	fastModeSensitivity    = flag.Int64("fastModeSensitivity", 20, "Number of blocks to be behind before fast mode is triggered")
 
 	// TODO(@ckartik): Pull txns commited to from DB and post in Oracle payload.
 	integreationTestMode = flag.Bool("integrationTestMode", false, "Integration Test Mode")
@@ -233,7 +233,15 @@ func run() (err error) {
 		}
 
 	}
-	tracer := chaintracer.NewSmartContractTracer(ctx, rc, l1Client, *startBlockNumber)
+	tracer := chaintracer.NewSmartContractTracer(ctx, chaintracer.SmartContractTracerOptions{
+		ContractClient:      rc,
+		L1Client:            l1Client,
+		StartingBlockNumber: *startBlockNumber,
+		FastModeSleep:       time.Duration(*fastModeSleep),
+		NormalModeSleep:     time.Duration(*normalModeSleep),
+		FastModeSensitivity: *fastModeSensitivity,
+	})
+
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
 		log.Info().Msg("Processing")
 		err = submitBlock(ctx, blockNumber, tracer, privateKey, txnStore)

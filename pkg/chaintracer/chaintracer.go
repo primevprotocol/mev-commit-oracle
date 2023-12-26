@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/pkg/errors"
 	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
@@ -36,37 +38,42 @@ type SmartContractTracer struct {
 	RateLimit           time.Duration
 	startingBlockNumber int64
 	L1Client            *ethclient.Client
+
+	// Configurable parameters fastModeSleep and normalModeSleep fastModeSensitivity
+
+	fastModeSleep       time.Duration
+	normalModeSleep     time.Duration
+	fastModeSensitivity int64
 }
 
 func (st *SmartContractTracer) GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64) {
-	if st.currentBlockNumberCached < st.startingBlockNumber {
-		st.currentBlockNumberCached = st.startingBlockNumber
-
-		return st.currentBlockNumberCached
-	}
 
 	// TODO(@ckartik): Use stored block number on contract instead of incrementing (For Failure reslience)
-	// nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
-	// 	Pending: false,
-	// 	From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-	// 	Context: ctx,
-	// })
-	// for err != nil {
-	// 	select {
-	// 	case <-ctx.Done():
-	// 		log.Info().Msg("Context cancelled, exiting GetNextBlockNumber")
-	// 		return -1
-	// 	default:
-	// 		log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
-	// 		time.Sleep(5 * time.Second)
-	// 		nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
-	// 			Pending: false,
-	// 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"), // TODO(@ckartik): See how we can remove this
-	// 			Context: ctx,
-	// 		})
-	// 	}
-	// }
-	st.currentBlockNumberCached = st.currentBlockNumberCached + 1
+	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+		Pending: false,
+		From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+		Context: ctx,
+	})
+	for err != nil {
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("Context cancelled, exiting GetNextBlockNumber")
+			return -1
+		default:
+			log.Error().Err(err).Msg("Error getting next block number, will go to sleep for 5 seconds and try again")
+			time.Sleep(5 * time.Second)
+			nextBlockNumber, err = st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
+				Pending: false,
+				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"), // TODO(@ckartik): See how we can remove this
+				Context: ctx,
+			})
+		}
+	}
+	st.currentBlockNumberCached = nextBlockNumber.Int64()
+	if nextBlockNumber.Int64() < st.startingBlockNumber {
+		log.Info().Int64("next_block_number", nextBlockNumber.Int64()).Int64("starting_block_number", st.startingBlockNumber).Msg("Next block number is less than starting block number, returning starting block number")
+		st.currentBlockNumberCached = st.startingBlockNumber
+	}
 
 	return st.currentBlockNumberCached
 }
@@ -80,12 +87,12 @@ func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuil
 	}
 	// Make fast mode flexible
 	// no hardcoded variables
-	if l1BlockNumber > uint64(st.currentBlockNumberCached+4) {
+	if l1BlockNumber > uint64(st.currentBlockNumberCached+st.fastModeSensitivity) {
 		log.Info().Uint64("l1_block_number", l1BlockNumber).Int64("current_oracle_block", st.currentBlockNumberCached).Msg("Fast Mode")
-		time.Sleep(2 * time.Second)
+		time.Sleep(st.fastModeSleep * time.Second)
 	} else {
 		log.Info().Uint64("l1_block_number", l1BlockNumber).Int64("current_oracle_block", st.currentBlockNumberCached).Msg("Normal Mode")
-		time.Sleep(12 * time.Second)
+		time.Sleep(st.normalModeSleep * time.Second)
 	}
 
 	log.Debug().Msg("Starting Retreival of Block Details")
@@ -117,15 +124,27 @@ func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuil
 	return blockData, string(L1Block.Header().Extra), nil
 }
 
-func NewSmartContractTracer(ctx context.Context, contractClient *rollupclient.Rollupclient, l1Client *ethclient.Client, startingBlockNumber int64) Tracer {
+type SmartContractTracerOptions struct {
+	ContractClient      *rollupclient.Rollupclient
+	L1Client            *ethclient.Client
+	StartingBlockNumber int64
+	FastModeSleep       time.Duration
+	NormalModeSleep     time.Duration
+	FastModeSensitivity int64
+}
+
+// NewSmartContractTracer creates a new SmartContractTracer with the given options.
+func NewSmartContractTracer(ctx context.Context, options SmartContractTracerOptions) Tracer {
 	tracer := &SmartContractTracer{
-		contractClient:      contractClient,
-		startingBlockNumber: startingBlockNumber,
-		L1Client:            l1Client,
+		contractClient:      options.ContractClient,
+		startingBlockNumber: options.StartingBlockNumber,
+		L1Client:            options.L1Client,
+		fastModeSleep:       options.FastModeSleep,
+		normalModeSleep:     options.NormalModeSleep,
+		fastModeSensitivity: options.FastModeSensitivity,
 	}
 
 	return tracer
-
 }
 
 type L1DataRetriver interface {

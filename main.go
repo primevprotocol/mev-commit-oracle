@@ -321,18 +321,29 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 		builder = integrationTestBuilders[blockNumber%int64(len(integrationTestBuilders))]
 	}
 
-	oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)
-	rawTx, err := oracleDataPostedTxn.MarshalBinary()
-	log.Info().Msgf("rawTxInHex in marshal binary: %s", common.Bytes2Hex(rawTx))
-	if err != nil {
-		return err
+	for i := 0; i < len(transactionsToPost); i += 10 {
+		end := i + 10
+		if end > len(transactionsToPost) {
+			end = len(transactionsToPost)
+		}
+		transactionsToPostBatch := transactionsToPost[i:end]
+
+		oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPostBatch, big.NewInt(blockNumber), builder)
+		rawTx, err := oracleDataPostedTxn.MarshalBinary()
+		log.Info().Msgf("rawTxInHex in marshal binary: %s", common.Bytes2Hex(rawTx))
+		if err != nil {
+			return err
+		}
+		deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
+		r, err := bind.WaitMined(deadlineCtx, client, oracleDataPostedTxn)
+		if err != nil {
+			return err
+		}
+		if r.Status != 1 {
+			return fmt.Errorf("%w: %v", ErrorBlockSubmission, err)
+		}
+		log.Info().Msgf("transaction hash: %s status: %d", oracleDataPostedTxn.Hash().Hex(), r.Status)
+		log.Info().Int("commitment_transactions_posted", len(transactionsToPost)).Int("txns_filtered_out", len(details.Transactions)-len(transactionsToPost)).Str("submission_txn_hash", oracleDataPostedTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	}
-	deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
-	r, err := bind.WaitMined(deadlineCtx, client, oracleDataPostedTxn)
-	if err != nil {
-		return err
-	}
-	log.Info().Msgf("transaction hash: %s status: %d", oracleDataPostedTxn.Hash().Hex(), r.Status)
-	log.Info().Int("commitment_transactions_posted", len(transactionsToPost)).Int("txns_filtered_out", len(details.Transactions)-len(transactionsToPost)).Str("submission_txn_hash", oracleDataPostedTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	return nil
 }

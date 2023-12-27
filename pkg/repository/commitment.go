@@ -76,10 +76,18 @@ func (f DBTxnStore) UpdateCommitmentsForBlockNumber(blockNumber int64) (done cha
 				return
 			}
 
-			sqlStatement := `
-			INSERT INTO committed_transactions (transaction, block_number)
-			VALUES ($1, $2)`
-			result, err := f.db.Exec(sqlStatement, commitmentTxnHash, blockNumber)
+			//sqlStatement := `
+			//INSERT INTO committed_transactions (transaction, block_number)
+			//VALUES ($1, $2)`
+
+			upsertSqlStament := `
+				INSERT INTO committed_transactions (transaction, block_number)
+				VALUES ($1, $2)
+				ON CONFLICT (transaction, block_number) 
+				DO UPDATE SET 
+    				transaction = EXCLUDED.transaction,
+    				block_number = EXCLUDED.block_number`
+			result, err := f.db.Exec(upsertSqlStament, commitmentTxnHash, blockNumber)
 			if err != nil {
 				if err, ok := err.(*pq.Error); ok {
 					// Check if the error is a duplicate key violation

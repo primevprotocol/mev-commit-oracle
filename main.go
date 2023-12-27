@@ -6,8 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/types"
-	"golang.org/x/crypto/sha3"
 	"math/big"
 	"os"
 	"time"
@@ -113,14 +111,6 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 	return auth, nil
 }
 
-type transactor struct {
-	*ethclient.Client
-}
-
-func (t *transactor) SendTransaction(ctx context.Context, tx *types.Transaction) error {
-	return nil
-}
-
 func init() {
 	var err error
 	// Initialize zerolog
@@ -153,7 +143,7 @@ func init() {
 		log.Fatal().Err(err).Msg("Failed to connect to the L1 Ethereum client")
 	}
 
-	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*oracleContract), &transactor{client})
+	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*oracleContract), client)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error creating oracle client")
 	}
@@ -191,23 +181,10 @@ func main() {
 	}
 }
 
-func GetEthAddressFromPubKey(key *ecdsa.PublicKey) common.Address {
-	pbBytes := crypto.FromECDSAPub(key)
-	hash := sha3.NewLegacyKeccak256()
-	hash.Write(pbBytes[1:])
-	address := hash.Sum(nil)[12:]
-
-	return common.BytesToAddress(address)
-}
 func run() (err error) {
 	ctx := context.Background()
 	// TODO(@ckartik): Move privatekey to AWS KMS
 	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
-	if privateKey == nil {
-		log.Info().Msg("private key is nil")
-	}
-	log.Info().Msgf("private key: %s, error: %v", *privateKeyInput, err)
-	log.Info().Msgf("account address: %s", GetEthAddressFromPubKey(&privateKey.PublicKey).Hex())
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating private key")
 		return

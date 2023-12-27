@@ -49,6 +49,8 @@ type SmartContractTracer struct {
 }
 
 func (st *SmartContractTracer) GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64) {
+	st.currentBlockNumberCached += 1
+	return st.currentBlockNumberCached
 
 	// TODO(@ckartik): Use stored block number on contract instead of incrementing (For Failure reslience)
 	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
@@ -71,8 +73,9 @@ func (st *SmartContractTracer) GetNextBlockNumber(ctx context.Context) (NewBlock
 			})
 		}
 	}
+
 	st.currentBlockNumberCached = nextBlockNumber.Int64()
-	if nextBlockNumber.Int64() < st.startingBlockNumber {
+	if st.currentBlockNumberCached < nextBlockNumber.Int64() {
 		log.Info().Int64("next_block_number", nextBlockNumber.Int64()).Int64("starting_block_number", st.startingBlockNumber).Msg("Next block number is less than starting block number, returning starting block number")
 		st.currentBlockNumberCached = st.startingBlockNumber
 	}
@@ -156,13 +159,14 @@ type SmartContractTracerOptions struct {
 // NewSmartContractTracer creates a new SmartContractTracer with the given options.
 func NewSmartContractTracer(ctx context.Context, options SmartContractTracerOptions) Tracer {
 	tracer := &SmartContractTracer{
-		contractClient:       options.ContractClient,
-		startingBlockNumber:  options.StartingBlockNumber,
-		L1Client:             options.L1Client,
-		fastModeSleep:        options.FastModeSleep,
-		normalModeSleep:      options.NormalModeSleep,
-		fastModeSensitivity:  options.FastModeSensitivity,
-		integreationTestMode: options.IntegrationMode,
+		contractClient:           options.ContractClient,
+		startingBlockNumber:      options.StartingBlockNumber,
+		L1Client:                 options.L1Client,
+		fastModeSleep:            options.FastModeSleep,
+		normalModeSleep:          options.NormalModeSleep,
+		fastModeSensitivity:      options.FastModeSensitivity,
+		integreationTestMode:     options.IntegrationMode,
+		currentBlockNumberCached: options.StartingBlockNumber,
 	}
 
 	return tracer

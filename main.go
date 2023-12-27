@@ -230,7 +230,7 @@ func run() (err error) {
 		IntegrationMode:     *integreationTestMode,
 	})
 
-	workChannel := make(chan SettlementWork)
+	workChannel := make(chan SettlementWork, 100)
 	go settler(ctx, authenticator, workChannel)
 	defer close(workChannel)
 
@@ -312,11 +312,9 @@ func settler(ctx context.Context, authenticator Authenticator, workChannel chan 
 	builderIdentityCache := make(map[string]common.Address)
 
 	for work := range workChannel {
-		var builderAddress common.Address
-		var err error
 
 		if _, ok := builderIdentityCache[work.builderName]; !ok {
-			builderAddress, err = rc.GetBuilder(&bind.CallOpts{
+			builderAddress, err := rc.GetBuilder(&bind.CallOpts{
 				Pending: false,
 				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
 				Context: context.Background(),

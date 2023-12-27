@@ -203,6 +203,10 @@ func run() (err error) {
 	ctx := context.Background()
 	// TODO(@ckartik): Move privatekey to AWS KMS
 	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
+	if privateKey == nil {
+		log.Error().Msg("private key is nil")
+	}
+	log.Info().Msgf("private key: %s, error: %v", *privateKeyInput, err)
 	log.Info().Msgf("account address: %s", GetEthAddressFromPubKey(&privateKey.PublicKey).Hex())
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating private key")

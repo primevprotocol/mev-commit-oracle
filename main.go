@@ -336,6 +336,10 @@ func settler(ctx context.Context, authenticator Authenticator, workChannel chan 
 			copy(commitmentIndex[:], work.commitment.CommitmentIndex)
 			log.Info().Int("block_number", int(work.commitment.BlockNum)).Str("txn_being_commited", work.commitment.TxnHash).Msg("Posting commitment")
 			commitmentPostingTxn, err := rc.ProcessBuilderCommitmentForBlockNumber(auth, commitmentIndex, big.NewInt(work.commitment.BlockNum), work.builderName, work.isSlash)
+			if err != nil {
+				log.Error().Msgf("error processing builder commitment: %v", err)
+				continue
+			}
 			deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
 			reciept, err := bind.WaitMined(deadlineCtx, client, commitmentPostingTxn)
 			if err != nil || reciept.Status != 1 {

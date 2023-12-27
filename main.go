@@ -348,10 +348,10 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 	}
 	deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
 	r, err := bind.WaitMined(deadlineCtx, client, oracleDataPostedTxn)
-	log.Info().Msgf("transaction hash: %s status: %d", oracleDataPostedTxn.Hash().Hex(), r.Status)
 	if err != nil {
 		return err
 	}
+	log.Info().Msgf("transaction hash: %s status: %d", oracleDataPostedTxn.Hash().Hex(), r.Status)
 	log.Info().Int("commitment_transactions_posted", len(transactionsToPost)).Int("txns_filtered_out", len(details.Transactions)-len(transactionsToPost)).Str("submission_txn_hash", oracleDataPostedTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	return nil
 }

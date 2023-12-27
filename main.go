@@ -42,7 +42,7 @@ var (
 	preConfContract        = flag.String("preconf", "0xBB632720f817792578060F176694D8f7230229d9", "Preconf contract address")
 	clientURL              = flag.String("rpc-url", "http://sl-bootnode:8545", "Client URL")
 	l1RPCURL               = flag.String("l1-rpc-url", "http://host.docker.internal:8545", "L1 Client URL")
-	privateKeyInput        = flag.String("key", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
+	privateKeyInput        = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
 	rateLimit              = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
 	startBlockNumber       = flag.Int64("startBlockNumber", 0, "Start Block Number")
 	onlyMonitorCommitments = flag.Bool("onlyMonitorCommitments", false, "Only monitor commitments")

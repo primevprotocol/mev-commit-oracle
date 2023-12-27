@@ -339,7 +339,7 @@ func settler(ctx context.Context, authenticator Authenticator, workChannel chan 
 			deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
 			reciept, err := bind.WaitMined(deadlineCtx, client, commitmentPostingTxn)
 			if err != nil || reciept.Status != 1 {
-				log.Error().Err(err).Msgf("Error posting commitment, receipt %v", reciept)
+				log.Error().Err(err).Msgf("transaction hash: %v, Error posting commitment, receipt %v", commitmentPostingTxn.Hash().Hex(), reciept)
 			}
 		}
 	}

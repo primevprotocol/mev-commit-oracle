@@ -32,7 +32,7 @@ type InfuraResponse struct {
 // to retrieve details about the next block that needs to be proccesed
 // it has the option of
 type SmartContractTracer struct {
-	contractClient           *rollupclient.Rollupclient
+	contractClient           *rollupclient.OracleClient
 	currentBlockNumberCached int64
 
 	RateLimit           time.Duration
@@ -44,9 +44,13 @@ type SmartContractTracer struct {
 	fastModeSleep       time.Duration
 	normalModeSleep     time.Duration
 	fastModeSensitivity int64
+
+	integreationTestMode bool
 }
 
 func (st *SmartContractTracer) GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64) {
+	st.currentBlockNumberCached += 1
+	return st.currentBlockNumberCached
 
 	// TODO(@ckartik): Use stored block number on contract instead of incrementing (For Failure reslience)
 	nextBlockNumber, err := st.contractClient.GetNextRequestedBlockNumber(&bind.CallOpts{
@@ -69,13 +73,25 @@ func (st *SmartContractTracer) GetNextBlockNumber(ctx context.Context) (NewBlock
 			})
 		}
 	}
+
 	st.currentBlockNumberCached = nextBlockNumber.Int64()
-	if nextBlockNumber.Int64() < st.startingBlockNumber {
+	if st.currentBlockNumberCached < nextBlockNumber.Int64() {
 		log.Info().Int64("next_block_number", nextBlockNumber.Int64()).Int64("starting_block_number", st.startingBlockNumber).Msg("Next block number is less than starting block number, returning starting block number")
 		st.currentBlockNumberCached = st.startingBlockNumber
 	}
 
 	return st.currentBlockNumberCached
+}
+
+var IntegrationTestBuilders = []string{
+	"0x48ddC642514370bdaFAd81C91e23759B0302C915",
+	"0x972eb4Fc3c457da4C957306bE7Fa1976BB8F39A6",
+	"0xA1e8FDB3bb6A0DB7aA5Db49a3512B01671686DCB",
+	"0xB9286CB4782E43A202BfD426AbB72c8cb34f886c",
+	"0xdaa1EEe546fc3f2d10C348d7fEfACE727C1dfa5B",
+	"0x93DC0b6A7F454Dd10373f1BdA7Fe80BB549EE2F9",
+	"0x426184Df456375BFfE7f53FdaF5cB48DeB3bbBE9",
+	"0x41cC09BD5a97F22045fe433f1AF0B07d0AB28F58",
 }
 
 // TODO(@ckartik): Move logic for service based data request to an isolated function.
@@ -120,28 +136,37 @@ func (st *SmartContractTracer) RetrieveDetails() (block *BlockDetails, BlockBuil
 	for _, txn := range txns {
 		blockData.Transactions = append(blockData.Transactions, txn.Hash().String())
 	}
+	builder := string(L1Block.Header().Extra)
 
-	return blockData, string(L1Block.Header().Extra), nil
+	// TODO(@ckartik): Move this to the chaintracer
+	if st.integreationTestMode {
+		builder = IntegrationTestBuilders[st.currentBlockNumberCached%int64(len(IntegrationTestBuilders))]
+	}
+
+	return blockData, builder, nil
 }
 
 type SmartContractTracerOptions struct {
-	ContractClient      *rollupclient.Rollupclient
+	ContractClient      *rollupclient.OracleClient
 	L1Client            *ethclient.Client
 	StartingBlockNumber int64
 	FastModeSleep       time.Duration
 	NormalModeSleep     time.Duration
 	FastModeSensitivity int64
+	IntegrationMode     bool
 }
 
 // NewSmartContractTracer creates a new SmartContractTracer with the given options.
 func NewSmartContractTracer(ctx context.Context, options SmartContractTracerOptions) Tracer {
 	tracer := &SmartContractTracer{
-		contractClient:      options.ContractClient,
-		startingBlockNumber: options.StartingBlockNumber,
-		L1Client:            options.L1Client,
-		fastModeSleep:       options.FastModeSleep,
-		normalModeSleep:     options.NormalModeSleep,
-		fastModeSensitivity: options.FastModeSensitivity,
+		contractClient:           options.ContractClient,
+		startingBlockNumber:      options.StartingBlockNumber,
+		L1Client:                 options.L1Client,
+		fastModeSleep:            options.FastModeSleep,
+		normalModeSleep:          options.NormalModeSleep,
+		fastModeSensitivity:      options.FastModeSensitivity,
+		integreationTestMode:     options.IntegrationMode,
+		currentBlockNumberCached: options.StartingBlockNumber,
 	}
 
 	return tracer
@@ -155,7 +180,7 @@ type L1DataRetriver interface {
 
 type Tracer interface {
 	GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64)
-	RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error)
+	RetrieveDetails() (block *BlockDetails, builderGrafiti string, err error)
 }
 
 type Payload struct {

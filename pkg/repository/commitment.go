@@ -73,7 +73,7 @@ func (f DBTxnStore) UpdateCommitmentsForBlockNumber(blockNumber int64) error {
 		insertSqlStatement := `
 			INSERT INTO committed_transactions (commitment_index, transaction, block_number, builder_address)
 			VALUES ($1, $2, $3, $4)`
-		_, err = f.db.Exec(insertSqlStatement, commitmentIndex, commitment.TxnHash, commitment.BlockNumber, commitment.Commiter.Bytes())
+		_, err = f.db.Exec(insertSqlStatement, commitmentIndex[:], commitment.TxnHash, commitment.BlockNumber, commitment.Commiter.Bytes())
 		if err != nil {
 			if err, ok := err.(*pq.Error); ok {
 				// Check if the error is a duplicate key violation

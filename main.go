@@ -326,7 +326,7 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 		return err
 	}
 	r, err := bind.WaitMined(ctx, client, oracleDataPostedTxn)
-	log.Info().Msgf("transaction starts: %d", r.Status)
+	log.Info().Msgf("transaction hash: %s status: %d", oracleDataPostedTxn.Hash().Hex(), r.Status)
 	if err != nil {
 		return err
 	}

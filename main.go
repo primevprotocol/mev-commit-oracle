@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/ethereum/go-ethereum/core/types"
+	"golang.org/x/crypto/sha3"
 	"math/big"
 	"os"
 	"time"
@@ -41,7 +42,7 @@ var (
 	preConfContract        = flag.String("preconf", "0xBB632720f817792578060F176694D8f7230229d9", "Preconf contract address")
 	clientURL              = flag.String("rpc-url", "http://sl-bootnode:8545", "Client URL")
 	l1RPCURL               = flag.String("l1-rpc-url", "http://host.docker.internal:8545", "L1 Client URL")
-	privateKeyInput        = flag.String("key", "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
+	privateKeyInput        = flag.String("key", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "Private Key")
 	rateLimit              = flag.Int64("rateLimit", 12, "Rate Limit in seconds")
 	startBlockNumber       = flag.Int64("startBlockNumber", 0, "Start Block Number")
 	onlyMonitorCommitments = flag.Bool("onlyMonitorCommitments", false, "Only monitor commitments")
@@ -190,10 +191,19 @@ func main() {
 	}
 }
 
+func GetEthAddressFromPubKey(key *ecdsa.PublicKey) common.Address {
+	pbBytes := crypto.FromECDSAPub(key)
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(pbBytes[1:])
+	address := hash.Sum(nil)[12:]
+
+	return common.BytesToAddress(address)
+}
 func run() (err error) {
 	ctx := context.Background()
 	// TODO(@ckartik): Move privatekey to AWS KMS
 	privateKey, err := crypto.HexToECDSA(*privateKeyInput)
+	log.Info().Msgf("account address: %s", GetEthAddressFromPubKey(&privateKey.PublicKey).Hex())
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating private key")
 		return
@@ -332,7 +342,7 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 
 	oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)
 	rawTx, err := oracleDataPostedTxn.MarshalBinary()
-	log.Info().Msgf("rawTxInHex: %s", common.Bytes2Hex(rawTx))
+	log.Info().Msgf("rawTxInHex in marshal binary: %s", common.Bytes2Hex(rawTx))
 	if err != nil {
 		return err
 	}

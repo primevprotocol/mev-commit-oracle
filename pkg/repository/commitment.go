@@ -23,7 +23,7 @@ type PreConfirmationsContract interface {
 // and store them in a local database
 type CommitmentsStore interface {
 	UpdateCommitmentsForBlockNumber(blockNumber int64) (done chan struct{}, err chan error)
-	RetrieveCommitments(blockNumber int64) (map[string]bool, error)
+	RetrieveCommitments(blockNumber int64) ([]Commitment, error)
 
 	// Used for restarting the Commitment Store on startup
 	LargestStoredBlockNumber() (int64, error)
@@ -111,10 +111,17 @@ func (f DBTxnStore) UpdateCommitmentsForBlockNumber(blockNumber int64) (done cha
 	return done, errorC
 }
 
-func (f DBTxnStore) RetrieveCommitments(blockNumber int64) (map[string]bool, error) {
-	Store := make(map[string]bool)
+type Commitment struct {
+	CommitmentIndex [32]byte
+	TxnHash         string
+	BlockNum        int64
+	BuilderAddress  [32]byte // Assuming builder_address is stored in binary format
+}
 
-	rows, err := f.db.Query("SELECT transaction FROM committed_transactions WHERE block_number = $1", blockNumber)
+func (f DBTxnStore) RetrieveCommitments(blockNumber int64) ([]Commitment, error) {
+	commitments := make([]Commitment, 0)
+
+	rows, err := f.db.Query("SELECT commitment_index, transaction, block_number, builder_address FROM committed_transactions WHERE block_number = $1", blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -122,13 +129,26 @@ func (f DBTxnStore) RetrieveCommitments(blockNumber int64) (map[string]bool, err
 	defer rows.Close()
 
 	for rows.Next() {
-		var txnHash string
-		err = rows.Scan(&txnHash)
+		var (
+			commitmentIndex [32]byte
+			txnHash         string
+			blockNum        int64
+			builderAddress  [32]byte // Assuming builder_address is stored in binary format
+		)
+
+		// Scan all the columns returned by the query
+		err = rows.Scan(&commitmentIndex, &txnHash, &blockNum, &builderAddress)
 		if err != nil {
 			return nil, err
 		}
-		Store[txnHash] = true
+
+		commitments = append(commitments, Commitment{
+			CommitmentIndex: commitmentIndex,
+			TxnHash:         txnHash,
+			BlockNum:        blockNum,
+			BuilderAddress:  builderAddress,
+		})
 	}
 
-	return Store, nil
+	return commitments, nil
 }

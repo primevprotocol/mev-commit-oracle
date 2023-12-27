@@ -55,7 +55,7 @@ var (
 	client   *ethclient.Client
 	l1Client *ethclient.Client
 	pc       *preconf.Preconf
-	rc       *rollupclient.Rollupclient
+	rc       *rollupclient.OracleClient
 	chainID  *big.Int
 )
 
@@ -85,9 +85,15 @@ func initDB() (db *sql.DB, err error) {
 	return db, err
 }
 
-func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.Client) (opts *bind.TransactOpts, err error) {
+type Authenticator struct {
+	PrivateKey *ecdsa.PrivateKey
+	ChainID    *big.Int
+	Client     *ethclient.Client
+}
+
+func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
 	// Set transaction opts
-	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+	auth, err := bind.NewKeyedTransactorWithChainID(a.PrivateKey, a.ChainID)
 	if err != nil {
 		return nil, err
 	}
@@ -99,14 +105,14 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 	auth.Nonce = big.NewInt(int64(nonce))
 
 	// Set gas price (optional)
-	gasPrice, err := client.SuggestGasPrice(context.Background())
+	gasPrice, err := a.Client.SuggestGasPrice(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	auth.GasPrice = gasPrice
 
 	// Set gas limit (you need to estimate or set a fixed value)
-	auth.GasLimit = uint64(30000000) // Example value
+	auth.GasLimit = uint64(30000000)
 
 	return auth, nil
 }
@@ -143,7 +149,7 @@ func init() {
 		log.Fatal().Err(err).Msg("Failed to connect to the L1 Ethereum client")
 	}
 
-	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*oracleContract), client)
+	rc, err = rollupclient.NewOracleClient(common.HexToAddress(*oracleContract), client)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error creating oracle client")
 	}
@@ -161,8 +167,8 @@ func init() {
 
 }
 
-func SetBuilderMapping(pk *ecdsa.PrivateKey, builderName string, builderAddress string) (txnHash string, err error) {
-	auth, err := getAuth(pk, chainID, client)
+func SetBuilderMapping(authenticator Authenticator, builderName string, builderAddress string) (txnHash string, err error) {
+	auth, err := authenticator.GetAuth()
 	if err != nil {
 		return "", err
 	}
@@ -189,11 +195,15 @@ func run() (err error) {
 		log.Error().Err(err).Msg("Error creating private key")
 		return
 	}
-
+	authenticator := Authenticator{
+		PrivateKey: privateKey,
+		ChainID:    chainID,
+		Client:     client,
+	}
 	if *integreationTestMode {
 		log.Info().Msg("Integration Test Mode Enabled. Setting fake builder mapping")
-		for _, builder := range integrationTestBuilders {
-			_, err = SetBuilderMapping(privateKey, builder, builder)
+		for _, builder := range chaintracer.IntegrationTestBuilders {
+			_, err = SetBuilderMapping(authenticator, builder, builder)
 			if err != nil {
 				log.Error().Err(err).Msg("Error setting builder mapping")
 				return
@@ -210,29 +220,6 @@ func run() (err error) {
 	time.Sleep(5 * time.Second)
 	log.Info().Msg("Sleeping to allow DB to initialize tables")
 
-	if *onlyMonitorCommitments {
-		for blockNumber, _ := txnStore.LargestStoredBlockNumber(); ; blockNumber++ {
-			done, err := txnStore.UpdateCommitmentsForBlockNumber(int64(blockNumber))
-			select {
-			case <-ctx.Done():
-				log.Info().Msg("Shutting down")
-
-			case <-done:
-				log.Debug().Int64("blockNumber", blockNumber).Msg("Done updating commitments")
-				txns, err := txnStore.RetrieveCommitments(blockNumber)
-				if err != nil {
-					log.Error().Err(err).Msg("Error retrieving commitments")
-					return err
-				}
-				for txn := range txns {
-					log.Info().Str("txn", txn).Msg("Txn was commited to")
-				}
-			case err := <-err:
-				log.Error().Err(err).Msg("Error updating commitments, skipping")
-			}
-		}
-
-	}
 	tracer := chaintracer.NewSmartContractTracer(ctx, chaintracer.SmartContractTracerOptions{
 		ContractClient:      rc,
 		L1Client:            l1Client,
@@ -240,11 +227,12 @@ func run() (err error) {
 		FastModeSleep:       time.Duration(*fastModeSleep),
 		NormalModeSleep:     time.Duration(*normalModeSleep),
 		FastModeSensitivity: *fastModeSensitivity,
+		IntegrationMode:     *integreationTestMode,
 	})
 
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
 		log.Info().Msg("Processing")
-		err = submitBlock(ctx, blockNumber, tracer, privateKey, txnStore)
+		err = submitBlock(ctx, blockNumber, tracer, authenticator, txnStore)
 		switch err { // Should be a different approach to make things cleaner
 		case nil:
 		case ErrorBlockDetails:
@@ -271,36 +259,42 @@ var (
 	ErrorUnableToFilter  = errors.New("Unable to filter transactions based on commitment")
 )
 
-var integrationTestBuilders = []string{
-	"0x48ddC642514370bdaFAd81C91e23759B0302C915",
-	"0x972eb4Fc3c457da4C957306bE7Fa1976BB8F39A6",
-	"0xA1e8FDB3bb6A0DB7aA5Db49a3512B01671686DCB",
-	"0xB9286CB4782E43A202BfD426AbB72c8cb34f886c",
-	"0xdaa1EEe546fc3f2d10C348d7fEfACE727C1dfa5B",
-	"0x93DC0b6A7F454Dd10373f1BdA7Fe80BB549EE2F9",
-	"0x426184Df456375BFfE7f53FdaF5cB48DeB3bbBE9",
-	"0x41cC09BD5a97F22045fe433f1AF0B07d0AB28F58",
+type SettlementWork struct {
+	commitment  repository.Commitment
+	isSlash     bool
+	builderName string
 }
 
 // submitblock initilaizes the retreivial and storage of commitments for a block number stored on the settlmenet layer,
 // processes it with L1 block data and submits a filtered list to the settlement layer
-func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, privateKey *ecdsa.PrivateKey, txnStore repository.CommitmentsStore) error {
+func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, authenticator Authenticator, txnStore repository.CommitmentsStore) error {
 	doneChan, errorChan := txnStore.UpdateCommitmentsForBlockNumber(blockNumber)
 	details, builder, err := tracer.RetrieveDetails()
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrorBlockDetails, err)
 	}
 
-	var transactionsToPost []string
+	workChannel := settler(ctx, authenticator)
+
+	// Get txns for the block into inclusion map
+	blockTxns := make(map[string]bool)
+	for _, txn := range details.Transactions {
+		blockTxns[txn] = true
+	}
+
 	select {
 	case <-doneChan:
-		txnsCommitedTo, err := txnStore.RetrieveCommitments(blockNumber)
+		commitments, err := txnStore.RetrieveCommitments(blockNumber)
 		if err != nil {
 			return ErrorUnableToFilter
 		}
-		for _, txn := range details.Transactions {
-			if txnsCommitedTo[txn] {
-				transactionsToPost = append(transactionsToPost, txn)
+		for _, commitment := range commitments {
+			isSlash := blockTxns[commitment.TxnHash]
+
+			workChannel <- SettlementWork{
+				commitment:  commitment,
+				isSlash:     isSlash,
+				builderName: builder,
 			}
 		}
 		log.Info().Msg("Received data from Store")
@@ -308,68 +302,31 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 		return fmt.Errorf("%w: %v", ErrorUnableToFilter, err)
 	}
 
-	log.Debug().Str("block_number", details.BlockNumber).Msg("Posting data to settlement layer")
-	auth, err := getAuth(privateKey, chainID, client)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrorAuth, err)
-	}
-
-	// Have an integreation compose
-	// When you have a true false branching, there is something wrong
-	// It's not a useful flag
-	if *integreationTestMode {
-		builder = integrationTestBuilders[blockNumber%int64(len(integrationTestBuilders))]
-	}
-
-	if len(transactionsToPost) == 0 {
-		err = send(ctx, auth, blockNumber, transactionsToPost, builder)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrorBlockSubmission, err)
-		}
-		log.Info().Msg("posting empty transaction list to settlement layer")
-		return nil
-	}
-
-	for i := 0; i < len(transactionsToPost); i += 10 {
-		end := i + 10
-		if end > len(transactionsToPost) {
-			end = len(transactionsToPost)
-		}
-		transactionsToPostBatch := transactionsToPost[i:end]
-
-		err = send(ctx, auth, blockNumber, transactionsToPostBatch, builder)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrorBlockSubmission, err)
-		}
-	}
-	log.Info().Int("commitment_transactions_posted", len(transactionsToPost)).
-		Int("txns_filtered_out", len(details.Transactions)-len(transactionsToPost)).
-		Msg("Block Data Send to Mev-Commit Settlement Contract")
 	return nil
 }
 
-func send(
-	ctx context.Context,
-	auth *bind.TransactOpts,
-	blockNumber int64,
-	transactionsToPostBatch []string,
-	builder string,
-) error {
-	oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPostBatch, big.NewInt(blockNumber), builder)
-	rawTx, err := oracleDataPostedTxn.MarshalBinary()
-	log.Info().Msgf("rawTxInHex in marshal binary: %s", common.Bytes2Hex(rawTx))
-	if err != nil {
-		return err
-	}
-	deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
-	r, err := bind.WaitMined(deadlineCtx, client, oracleDataPostedTxn)
-	if err != nil {
-		return err
-	}
-	//if r.Status != 1 {
-	//	return fmt.Errorf("%w: %v", ErrorBlockSubmission, err)
-	//}
-	log.Info().Msgf("transaction hash: %s status: %d", oracleDataPostedTxn.Hash().Hex(), r.Status)
+// Does the job of submitting the commitments to the rollup
+// TODO(@ckartik): Optimize using Aloks method for nonce management
+func settler(ctx context.Context, authenticator Authenticator) chan SettlementWork {
+	workChannel := make(chan SettlementWork, 100)
 
-	return nil
+	go func(ctx context.Context, workChannel <-chan SettlementWork, authenticator Authenticator) {
+		for work := range workChannel {
+			auth, err := authenticator.GetAuth()
+			if err != nil {
+				log.Fatal().Err(err).Msg("Error constructing auth")
+			}
+			log.Info().Int("block_number", int(work.commitment.BlockNum)).Str("txn_being_commited", work.commitment.TxnHash).Msg("Posting commitment")
+			commitmentPostingTxn, err := rc.ProcessBuilderCommitmentForBlockNumber(auth, work.commitment.CommitmentIndex, big.NewInt(work.commitment.BlockNum), work.builderName, work.isSlash)
+			deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
+			reciept, err := bind.WaitMined(deadlineCtx, client, commitmentPostingTxn)
+			if err != nil || reciept.Status != 1 {
+				log.Error().Err(err).Msgf("Error posting commitment, receipt %v", reciept)
+			}
+			_ = work
+			_ = auth
+		}
+	}(ctx, workChannel, authenticator)
+
+	return workChannel
 }

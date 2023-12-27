@@ -331,8 +331,11 @@ func settler(ctx context.Context, authenticator Authenticator, workChannel chan 
 			if err != nil {
 				log.Fatal().Err(err).Msg("Error constructing auth")
 			}
+
+			var commitmentIndex [32]byte
+			copy(commitmentIndex[:], work.commitment.CommitmentIndex)
 			log.Info().Int("block_number", int(work.commitment.BlockNum)).Str("txn_being_commited", work.commitment.TxnHash).Msg("Posting commitment")
-			commitmentPostingTxn, err := rc.ProcessBuilderCommitmentForBlockNumber(auth, work.commitment.CommitmentIndex, big.NewInt(work.commitment.BlockNum), work.builderName, work.isSlash)
+			commitmentPostingTxn, err := rc.ProcessBuilderCommitmentForBlockNumber(auth, commitmentIndex, big.NewInt(work.commitment.BlockNum), work.builderName, work.isSlash)
 			deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
 			reciept, err := bind.WaitMined(deadlineCtx, client, commitmentPostingTxn)
 			if err != nil || reciept.Status != 1 {

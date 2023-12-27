@@ -91,10 +91,10 @@ func (f DBTxnStore) UpdateCommitmentsForBlockNumber(blockNumber int64) error {
 }
 
 type Commitment struct {
-	CommitmentIndex [32]byte
+	CommitmentIndex []byte
 	TxnHash         string
 	BlockNum        int64
-	BuilderAddress  [32]byte // Assuming builder_address is stored in binary format
+	BuilderAddress  []byte // Assuming builder_address is stored in binary format
 }
 
 func (f DBTxnStore) RetrieveCommitments(blockNumber int64) ([]Commitment, error) {
@@ -109,10 +109,10 @@ func (f DBTxnStore) RetrieveCommitments(blockNumber int64) ([]Commitment, error)
 
 	for rows.Next() {
 		var (
-			commitmentIndex [32]byte
+			commitmentIndex []byte
 			txnHash         string
 			blockNum        int64
-			builderAddress  [32]byte // Assuming builder_address is stored in binary format
+			builderAddress  []byte // Assuming builder_address is stored in binary format
 		)
 
 		// Scan all the columns returned by the query

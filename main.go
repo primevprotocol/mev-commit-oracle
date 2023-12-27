@@ -290,7 +290,7 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 
 	commitments, err := txnStore.RetrieveCommitments(blockNumber)
 	if err != nil {
-		return ErrorUnableToFilter
+		return err
 	}
 	for _, commitment := range commitments {
 		isSlash := blockTxns[commitment.TxnHash]

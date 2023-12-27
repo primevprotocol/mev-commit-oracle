@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/lib/pq"
+	"github.com/primevprotocol/mev-oracle/pkg/preconf"
 	"github.com/rs/zerolog/log"
 )
 
@@ -15,6 +16,7 @@ import (
 type PreConfirmationsContract interface {
 	GetCommitmentsByBlockNumber(opts *bind.CallOpts, blockNumber *big.Int) ([][32]byte, error)
 	GetTxnHashFromCommitment(opts *bind.CallOpts, commitmentIndex [32]byte) (string, error)
+	GetCommitment(opts *bind.CallOpts, commitmentIndex [32]byte) (preconf.PreConfCommitmentStorePreConfCommitment, error)
 }
 
 // CommitmentsStore is an interface that is used to retrieve commitments from the smart contract
@@ -53,7 +55,7 @@ func (f DBTxnStore) UpdateCommitmentsForBlockNumber(blockNumber int64) (done cha
 	errorC = make(chan error)
 
 	go func(done chan struct{}, errorC chan error) {
-		commitments, err := f.preConfClient.GetCommitmentsByBlockNumber(&bind.CallOpts{
+		commitmentIndexes, err := f.preConfClient.GetCommitmentsByBlockNumber(&bind.CallOpts{
 			Pending: false,
 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
 			Context: context.Background(),
@@ -63,31 +65,26 @@ func (f DBTxnStore) UpdateCommitmentsForBlockNumber(blockNumber int64) (done cha
 			errorC <- err
 			return
 		}
-		log.Info().Int("block_number", int(blockNumber)).Int("commitments", len(commitments)).Msg("Retrieved commitments")
-		for _, commitment := range commitments {
-			commitmentTxnHash, err := f.preConfClient.GetTxnHashFromCommitment(&bind.CallOpts{
+		log.Info().Int("block_number", int(blockNumber)).Int("commitments", len(commitmentIndexes)).Msg("Retrieved commitment indexes")
+		for _, commitmentIndex := range commitmentIndexes {
+			commitment, err := f.preConfClient.GetCommitment(&bind.CallOpts{
 				Pending: false,
 				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
 				Context: context.Background(),
-			}, commitment)
+			}, commitmentIndex)
 			if err != nil {
 				log.Error().Err(err).Msg("Error getting txn hash from commitment")
 				errorC <- err
 				return
 			}
-
 			//sqlStatement := `
 			//INSERT INTO committed_transactions (transaction, block_number)
 			//VALUES ($1, $2)`
 
-			upsertSqlStament := `
-				INSERT INTO committed_transactions (transaction, block_number)
-				VALUES ($1, $2)
-				ON CONFLICT (transaction, block_number) 
-				DO UPDATE SET 
-    				transaction = EXCLUDED.transaction,
-    				block_number = EXCLUDED.block_number`
-			result, err := f.db.Exec(upsertSqlStament, commitmentTxnHash, blockNumber)
+			insertSqlStatement := `
+			INSERT INTO committed_transactions (commitment_index, transaction, block_number, builder_address)
+			VALUES ($1, $2, $3, $4)`
+			result, err := f.db.Exec(insertSqlStatement, commitmentIndex, commitment.TxnHash, commitment.BlockNumber, commitment.Commiter.Bytes())
 			if err != nil {
 				if err, ok := err.(*pq.Error); ok {
 					// Check if the error is a duplicate key violation

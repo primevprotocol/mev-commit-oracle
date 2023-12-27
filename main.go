@@ -115,7 +115,7 @@ func init() {
 	var err error
 	// Initialize zerolog
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(os.Stdout)
+	log.Logger = log.Output(os.Stdout).With().Caller().Logger()
 
 	/* Start of Setup */
 	log.Info().Msg("Parsing flags...")
@@ -323,10 +323,12 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 
 	oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)
 	if err != nil {
-		log.Error().Err(err).Msg("Error posting data to settlement layer")
-		return ErrorBlockSubmission
+		return err
 	}
-
+	_, err = bind.WaitMined(ctx, client, oracleDataPostedTxn)
+	if err != nil {
+		return err
+	}
 	log.Info().Int("commitment_transactions_posted", len(transactionsToPost)).Int("txns_filtered_out", len(details.Transactions)-len(transactionsToPost)).Str("submission_txn_hash", oracleDataPostedTxn.Hash().String()).Msg("Block Data Send to Mev-Commit Settlement Contract")
 	return nil
 }

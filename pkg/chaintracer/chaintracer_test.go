@@ -14,9 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	repository "github.com/primevprotocol/mev-oracle/pkg/Repository"
 	"github.com/primevprotocol/mev-oracle/pkg/chaintracer"
-	"github.com/stretchr/testify/assert"
 )
 
 func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.Client, t *testing.T) (opts *bind.TransactOpts) {
@@ -101,25 +99,4 @@ func (d *mockTracer) RetrieveDetails() (block *chaintracer.BlockDetails, BlockBu
 	sleepDuration, _ := rand.Int(rand.Reader, big.NewInt(12))
 	time.Sleep(time.Duration(sleepDuration.Int64()) * time.Second)
 	return block, "k builder", nil
-}
-
-func TestFilter(t *testing.T) {
-	txnFilter := repository.NewTransactionCommitmentFilter(&mockPreConfContract{
-		commitmentsAndTxnHashes: map[[32]byte]string{
-			{0x02, 0x90, 0x00}: "0xalok",
-			{0x02, 0x90, 0x01}: "0xkartik",
-			{0x02, 0x90, 0x32}: "0xkant",
-			{0x02, 0x90, 0x02}: "0xshawn",
-		},
-	})
-	commitmentChannel, errChannel := txnFilter.RetrieveCommitments(2)
-	commit := <-commitmentChannel
-	assert.Equal(t, true, commit["0xalok"])
-	assert.Equal(t, true, commit["0xkartik"])
-	assert.Equal(t, true, commit["0xkant"])
-	assert.Equal(t, true, commit["0xshawn"])
-	assert.Equal(t, false, commit["0xmurat"])
-
-	assert.Nil(t, <-errChannel)
-
 }

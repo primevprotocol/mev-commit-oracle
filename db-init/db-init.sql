@@ -1,5 +1,5 @@
 CREATE TABLE committed_transactions (
-    commitment_index BBYTEA PRIMARY KEY,
+    commitment_index BYTEA PRIMARY KEY,
     transaction VARCHAR(255),
     block_number BIGINT,
     builder_address BYTEA

@@ -366,9 +366,9 @@ func send(
 	if err != nil {
 		return err
 	}
-	if r.Status != 1 {
-		return fmt.Errorf("%w: %v", ErrorBlockSubmission, err)
-	}
+	//if r.Status != 1 {
+	//	return fmt.Errorf("%w: %v", ErrorBlockSubmission, err)
+	//}
 	log.Info().Msgf("transaction hash: %s status: %d", oracleDataPostedTxn.Hash().Hex(), r.Status)
 
 	return nil

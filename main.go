@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/types"
 	"math/big"
 	"os"
 	"time"
@@ -111,6 +112,14 @@ func getAuth(privateKey *ecdsa.PrivateKey, chainID *big.Int, client *ethclient.C
 	return auth, nil
 }
 
+type transactor struct {
+	*ethclient.Client
+}
+
+func (t *transactor) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+	return nil
+}
+
 func init() {
 	var err error
 	// Initialize zerolog
@@ -143,7 +152,7 @@ func init() {
 		log.Fatal().Err(err).Msg("Failed to connect to the L1 Ethereum client")
 	}
 
-	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*oracleContract), client)
+	rc, err = rollupclient.NewRollupclient(common.HexToAddress(*oracleContract), &transactor{client})
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error creating oracle client")
 	}
@@ -322,10 +331,13 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 	}
 
 	oracleDataPostedTxn, err := rc.ReceiveBlockData(auth, transactionsToPost, big.NewInt(blockNumber), builder)
+	rawTx, err := oracleDataPostedTxn.MarshalBinary()
+	log.Info().Msgf("rawTxInHex: %s", common.Bytes2Hex(rawTx))
 	if err != nil {
 		return err
 	}
-	r, err := bind.WaitMined(ctx, client, oracleDataPostedTxn)
+	deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
+	r, err := bind.WaitMined(deadlineCtx, client, oracleDataPostedTxn)
 	log.Info().Msgf("transaction hash: %s status: %d", oracleDataPostedTxn.Hash().Hex(), r.Status)
 	if err != nil {
 		return err

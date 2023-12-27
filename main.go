@@ -230,9 +230,13 @@ func run() (err error) {
 		IntegrationMode:     *integreationTestMode,
 	})
 
+	workChannel := make(chan SettlementWork)
+	go settler(ctx, authenticator, workChannel)
+	defer close(workChannel)
+
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {
 		log.Info().Msg("Processing")
-		err = submitBlock(ctx, blockNumber, tracer, authenticator, txnStore)
+		err = submitBlock(ctx, blockNumber, tracer, authenticator, txnStore, workChannel)
 		switch err { // Should be a different approach to make things cleaner
 		case nil:
 		case ErrorBlockDetails:
@@ -267,14 +271,16 @@ type SettlementWork struct {
 
 // submitblock initilaizes the retreivial and storage of commitments for a block number stored on the settlmenet layer,
 // processes it with L1 block data and submits a filtered list to the settlement layer
-func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, authenticator Authenticator, txnStore repository.CommitmentsStore) error {
-	doneChan, errorChan := txnStore.UpdateCommitmentsForBlockNumber(blockNumber)
-	details, builder, err := tracer.RetrieveDetails()
+func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Tracer, authenticator Authenticator, txnStore repository.CommitmentsStore, workChannel chan SettlementWork) error {
+	err := txnStore.UpdateCommitmentsForBlockNumber(blockNumber)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrorBlockDetails, err)
 	}
 
-	workChannel := settler(ctx, authenticator)
+	details, builder, err := tracer.RetrieveDetails()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrorBlockDetails, err)
+	}
 
 	// Get txns for the block into inclusion map
 	blockTxns := make(map[string]bool)
@@ -282,36 +288,47 @@ func submitBlock(ctx context.Context, blockNumber int64, tracer chaintracer.Trac
 		blockTxns[txn] = true
 	}
 
-	select {
-	case <-doneChan:
-		commitments, err := txnStore.RetrieveCommitments(blockNumber)
-		if err != nil {
-			return ErrorUnableToFilter
-		}
-		for _, commitment := range commitments {
-			isSlash := blockTxns[commitment.TxnHash]
-
-			workChannel <- SettlementWork{
-				commitment:  commitment,
-				isSlash:     isSlash,
-				builderName: builder,
-			}
-		}
-		log.Info().Msg("Received data from Store")
-	case err := <-errorChan:
-		return fmt.Errorf("%w: %v", ErrorUnableToFilter, err)
+	commitments, err := txnStore.RetrieveCommitments(blockNumber)
+	if err != nil {
+		return ErrorUnableToFilter
 	}
+	for _, commitment := range commitments {
+		isSlash := blockTxns[commitment.TxnHash]
+
+		workChannel <- SettlementWork{
+			commitment:  commitment,
+			isSlash:     isSlash,
+			builderName: builder,
+		}
+	}
+	log.Info().Msg("Received data from Store")
 
 	return nil
 }
 
 // Does the job of submitting the commitments to the rollup
 // TODO(@ckartik): Optimize using Aloks method for nonce management
-func settler(ctx context.Context, authenticator Authenticator) chan SettlementWork {
-	workChannel := make(chan SettlementWork, 100)
+func settler(ctx context.Context, authenticator Authenticator, workChannel chan SettlementWork) {
+	builderIdentityCache := make(map[string]common.Address)
 
-	go func(ctx context.Context, workChannel <-chan SettlementWork, authenticator Authenticator) {
-		for work := range workChannel {
+	for work := range workChannel {
+		var builderAddress common.Address
+		var err error
+
+		if _, ok := builderIdentityCache[work.builderName]; !ok {
+			builderAddress, err = rc.GetBuilder(&bind.CallOpts{
+				Pending: false,
+				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+				Context: context.Background(),
+			}, work.builderName)
+			if err != nil { // TODO(@ckartik): Think about how to handle this
+				log.Error().Err(err).Msg("Error getting builder address")
+				continue
+			}
+			builderIdentityCache[work.builderName] = builderAddress
+		}
+
+		if builderIdentityCache[work.builderName].Cmp(common.BytesToAddress(work.commitment.BuilderAddress[:])) == 0 {
 			auth, err := authenticator.GetAuth()
 			if err != nil {
 				log.Fatal().Err(err).Msg("Error constructing auth")
@@ -323,10 +340,6 @@ func settler(ctx context.Context, authenticator Authenticator) chan SettlementWo
 			if err != nil || reciept.Status != 1 {
 				log.Error().Err(err).Msgf("Error posting commitment, receipt %v", reciept)
 			}
-			_ = work
-			_ = auth
 		}
-	}(ctx, workChannel, authenticator)
-
-	return workChannel
+	}
 }

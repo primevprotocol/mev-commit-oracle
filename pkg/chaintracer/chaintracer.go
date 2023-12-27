@@ -180,7 +180,7 @@ type L1DataRetriver interface {
 
 type Tracer interface {
 	GetNextBlockNumber(ctx context.Context) (NewBlockNumber int64)
-	RetrieveDetails() (block *BlockDetails, BlockBuilder string, err error)
+	RetrieveDetails() (block *BlockDetails, builderGrafiti string, err error)
 }
 
 type Payload struct {

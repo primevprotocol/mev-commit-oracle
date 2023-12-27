@@ -22,7 +22,7 @@ type PreConfirmationsContract interface {
 // CommitmentsStore is an interface that is used to retrieve commitments from the smart contract
 // and store them in a local database
 type CommitmentsStore interface {
-	UpdateCommitmentsForBlockNumber(blockNumber int64) (done chan struct{}, err chan error)
+	UpdateCommitmentsForBlockNumber(blockNumber int64) error
 	RetrieveCommitments(blockNumber int64) ([]Commitment, error)
 
 	// Used for restarting the Commitment Store on startup
@@ -50,65 +50,44 @@ func (f DBTxnStore) LargestStoredBlockNumber() (int64, error) {
 	return largestBlockNumber, nil
 }
 
-func (f DBTxnStore) UpdateCommitmentsForBlockNumber(blockNumber int64) (done chan struct{}, errorC chan error) {
-	done = make(chan struct{})
-	errorC = make(chan error)
-
-	go func(done chan struct{}, errorC chan error) {
-		commitmentIndexes, err := f.preConfClient.GetCommitmentsByBlockNumber(&bind.CallOpts{
+func (f DBTxnStore) UpdateCommitmentsForBlockNumber(blockNumber int64) error {
+	commitmentIndexes, err := f.preConfClient.GetCommitmentsByBlockNumber(&bind.CallOpts{
+		Pending: false,
+		From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+		Context: context.Background(),
+	}, big.NewInt(blockNumber))
+	if err != nil {
+		return err
+	}
+	log.Info().Int("block_number", int(blockNumber)).Int("commitments", len(commitmentIndexes)).Msg("Retrieved commitment indexes")
+	for _, commitmentIndex := range commitmentIndexes {
+		commitment, err := f.preConfClient.GetCommitment(&bind.CallOpts{
 			Pending: false,
 			From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
 			Context: context.Background(),
-		}, big.NewInt(blockNumber))
+		}, commitmentIndex)
 		if err != nil {
-			log.Error().Err(err).Msg("Error getting commitments")
-			errorC <- err
-			return
+			return err
 		}
-		log.Info().Int("block_number", int(blockNumber)).Int("commitments", len(commitmentIndexes)).Msg("Retrieved commitment indexes")
-		for _, commitmentIndex := range commitmentIndexes {
-			commitment, err := f.preConfClient.GetCommitment(&bind.CallOpts{
-				Pending: false,
-				From:    common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-				Context: context.Background(),
-			}, commitmentIndex)
-			if err != nil {
-				log.Error().Err(err).Msg("Error getting txn hash from commitment")
-				errorC <- err
-				return
-			}
-			//sqlStatement := `
-			//INSERT INTO committed_transactions (transaction, block_number)
-			//VALUES ($1, $2)`
 
-			insertSqlStatement := `
+		insertSqlStatement := `
 			INSERT INTO committed_transactions (commitment_index, transaction, block_number, builder_address)
 			VALUES ($1, $2, $3, $4)`
-			result, err := f.db.Exec(insertSqlStatement, commitmentIndex, commitment.TxnHash, commitment.BlockNumber, commitment.Commiter.Bytes())
-			if err != nil {
-				if err, ok := err.(*pq.Error); ok {
-					// Check if the error is a duplicate key violation
-					if err.Code.Name() == "unique_violation" {
-						log.Info().Msg("Duplicate key violation - ignoring")
-						continue
-					}
+		_, err = f.db.Exec(insertSqlStatement, commitmentIndex, commitment.TxnHash, commitment.BlockNumber, commitment.Commiter.Bytes())
+		if err != nil {
+			if err, ok := err.(*pq.Error); ok {
+				// Check if the error is a duplicate key violation
+				if err.Code.Name() == "unique_violation" {
+					log.Info().Msg("Duplicate key violation - ignoring")
+					continue
 				}
-				log.Error().Err(err).Msg("Error inserting txn into DB")
-				errorC <- err
-				return
 			}
-			rowsImpacted, err := result.RowsAffected()
-			if err != nil {
-				log.Error().Err(err).Msg("Error getting rows impacted")
-				errorC <- err
-				return
-			}
-			log.Debug().Int("rows_affected", int(rowsImpacted)).Msg("Inserted txn into DB")
+			return err
 		}
-		done <- struct{}{}
-	}(done, errorC)
 
-	return done, errorC
+	}
+
+	return nil
 }
 
 type Commitment struct {

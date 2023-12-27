@@ -36,7 +36,7 @@ const (
 )
 
 var (
-	oracleContract         = flag.String("oracle", "0x51dcB14bcb0B4eE747BE445550A4Fb53ecd31617", "Oracle contract address")
+	oracleContract         = flag.String("oracle", "0xA8Efc1287bAEbbD19052CAF62F265E668fcF2146", "Oracle contract address")
 	preConfContract        = flag.String("preconf", "0xBB632720f817792578060F176694D8f7230229d9", "Preconf contract address")
 	clientURL              = flag.String("rpc-url", "http://sl-bootnode:8545", "Client URL")
 	l1RPCURL               = flag.String("l1-rpc-url", "http://host.docker.internal:8545", "L1 Client URL")

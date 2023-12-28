@@ -39,7 +39,7 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 	go func() {
 		defer close(doneChan)
 
-		ticker := time.NewTicker(1 * time.Second)
+		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
 		currentBlockNo := 0

@@ -154,7 +154,7 @@ func (s *Store) SubscribeSettlements(ctx context.Context) <-chan settler.Settlem
 			queryStr := `
 				SELECT commitment_index, transaction, block_number, builder_address, is_slash
 				FROM settlements
-				WHERE settled = false AND nonce != 0`
+				WHERE settled = false AND chainhash IS NULL`
 			results, err := s.db.QueryContext(ctx, queryStr)
 			if err != nil {
 				return

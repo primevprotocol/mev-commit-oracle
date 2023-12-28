@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS settlements (
     builder_address BYTEA,
     is_slash BOOLEAN,
     nonce BIGINT,
-    chainhash BYTEA
+    chainhash BYTEA,
     settled BOOLEAN
 );`
 

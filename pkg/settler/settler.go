@@ -126,6 +126,11 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 				continue
 			}
 
+			log.Info().
+				Uint64("blockNum", currentBlock).
+				Uint64("lastNonce", lastNonce).
+				Msg("marked settlement complete")
+
 			lastBlock = currentBlock
 		}
 
@@ -180,6 +185,13 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 					log.Error().Err(err).Msg("failed to mark settlement initiated")
 					continue
 				}
+
+				log.Info().
+					Int64("blockNum", settlement.BlockNum).
+					Str("txHash", commitmentPostingTxn.Hash().Hex()).
+					Str("builder", settlement.Builder).
+					Bool("isSlash", settlement.IsSlash).
+					Msg("builder commitment processed")
 			}
 		}
 	}()

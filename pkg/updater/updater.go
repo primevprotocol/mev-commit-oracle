@@ -109,6 +109,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 					continue
 				}
 
+				count := 0
 				for _, index := range commitmentIndexes {
 					commitment, err := u.preconfClient.GetCommitment(u.getCallOpts(ctx), index)
 					if err != nil {
@@ -130,6 +131,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 							log.Error().Err(err).Msg("failed to add settlement")
 							continue WINNER_LOOP
 						}
+						count++
 					}
 				}
 
@@ -137,6 +139,13 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 				if err != nil {
 					log.Error().Err(err).Msg("failed to update completion of block updates")
 				}
+
+				log.Info().
+					Int("count", count).
+					Int64("blockNumber", winner.BlockNumber).
+					Str("winner", winner.Winner).
+					Msg("added settlements")
+
 			}
 		}
 	}()

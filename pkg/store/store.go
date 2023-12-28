@@ -152,7 +152,7 @@ func (s *Store) SubscribeSettlements(ctx context.Context) <-chan settler.Settlem
 	RETRY:
 		for {
 			queryStr := `
-				SELECT commitment_idx, tx_hash, block_number, builder_address, is_slash
+				SELECT commitment_index, transaction, block_number, builder_address, is_slash
 				FROM settlements
 				WHERE settled = false AND nonce != 0`
 			results, err := s.db.QueryContext(ctx, queryStr)
@@ -210,7 +210,7 @@ func (s *Store) SettlementInitiated(
 func (s *Store) MarkSettlementComplete(ctx context.Context, nonce uint64) error {
 	_, err := s.db.ExecContext(
 		ctx,
-		"UPDATE settlements SET settled = true WHERE nonce < $1",
+		"UPDATE settlements SET settled = true WHERE nonce < $1 AND chainhash IS NOT NULL",
 		nonce,
 	)
 	if err != nil {

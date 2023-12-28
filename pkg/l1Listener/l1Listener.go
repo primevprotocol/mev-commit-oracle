@@ -69,6 +69,11 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 							Msgf("failed to register winner for block %d", header.Number.Int64())
 						return
 					}
+
+					log.Info().
+						Str("winner", winner).
+						Int64("block", header.Number.Int64()).
+						Msg("registered winner")
 				}
 			}
 		}

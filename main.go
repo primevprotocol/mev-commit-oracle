@@ -109,7 +109,7 @@ func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
 	if err != nil {
 		return nil, err
 	}
-	auth.GasPrice = gasPrice
+	auth.GasPrice = gasPrice.Mul(gasPrice, big.NewInt(2))
 
 	// Set gas limit (you need to estimate or set a fixed value)
 	auth.GasLimit = uint64(30000000)

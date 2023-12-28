@@ -66,7 +66,8 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 					err := l.winnerRegister.RegisterWinner(ctx, header.Number.Int64(), winner)
 					if err != nil {
 						log.Error().Err(err).
-							Msgf("failed to register winner for block %d", header.Number.Int64())
+							Int64("block", header.Number.Int64()).
+							Msg("failed to register winner for block")
 						return
 					}
 

@@ -95,20 +95,22 @@ type Authenticator struct {
 }
 
 func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
-	a.lock.Lock()
-	defer a.lock.Unlock()
 	// Set transaction opts
 	auth, err := bind.NewKeyedTransactorWithChainID(a.PrivateKey, a.ChainID)
 	if err != nil {
 		return nil, err
 	}
-	// // Set nonce (optional)
-	// nonce, err := client.PendingNonceAt(context.Background(), auth.From)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	// Set nonce (optional)
+	nonce, err := client.PendingNonceAt(context.Background(), auth.From)
+	if err != nil {
+		return nil, err
+	}
+	if int64(nonce) > a.Nonce.Int64() {
+		a.Nonce = big.NewInt(int64(nonce))
+	}
 	auth.Nonce = a.Nonce
-	a.Nonce = a.Nonce.Add(a.Nonce, big.NewInt(1))
+	a.Nonce.Add(a.Nonce, big.NewInt(1))
+
 	// Set gas price (optional)
 	gasPrice, err := a.Client.SuggestGasPrice(context.Background())
 	if err != nil {
@@ -335,8 +337,10 @@ func settler(ctx context.Context, authenticator Authenticator, workChannel chan 
 		}
 
 		if builderIdentityCache[work.builderName].Cmp(common.BytesToAddress(work.commitment.BuilderAddress[:])) == 0 {
+			authenticator.lock.Lock()
 			auth, err := authenticator.GetAuth()
 			if err != nil {
+				authenticator.lock.Unlock()
 				log.Fatal().Err(err).Msg("Error constructing auth")
 			}
 
@@ -346,8 +350,12 @@ func settler(ctx context.Context, authenticator Authenticator, workChannel chan 
 			commitmentPostingTxn, err := rc.ProcessBuilderCommitmentForBlockNumber(auth, commitmentIndex, big.NewInt(work.commitment.BlockNum), work.builderName, work.isSlash)
 			if err != nil {
 				log.Error().Msgf("error processing builder commitment: %v", err)
+				authenticator.lock.Unlock()
 				continue
 			}
+			// Unlock mutex once txn with nonce is sent
+			authenticator.lock.Unlock()
+
 			deadlineCtx, _ := context.WithTimeout(ctx, 30*time.Second)
 			reciept, err := bind.WaitMined(deadlineCtx, client, commitmentPostingTxn)
 			if err != nil || reciept.Status != 1 {

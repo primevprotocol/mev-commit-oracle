@@ -196,7 +196,7 @@ func (s *Store) SettlementInitiated(
 ) error {
 	_, err := s.db.ExecContext(
 		ctx,
-		"UPDATE settlements SET transaction = $1, nonce = $2 WHERE commitment_index = $3",
+		"UPDATE settlements SET chainhash = $1, nonce = $2 WHERE commitment_index = $3",
 		txHash.Bytes(),
 		nonce,
 		commitmentIdx,

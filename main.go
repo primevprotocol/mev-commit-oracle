@@ -175,6 +175,11 @@ func SetBuilderMapping(
 		return "", err
 	}
 
+	_, err = bind.WaitMined(context.Background(), authenticator.Client, txn)
+	if err != nil {
+		return "", err
+	}
+
 	return txn.Hash().String(), nil
 }
 

@@ -2,10 +2,9 @@ package l1Listener
 
 import (
 	"context"
-	"errors"
+	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/rs/zerolog/log"
 )
@@ -15,7 +14,8 @@ type WinnerRegister interface {
 }
 
 type EthClient interface {
-	SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error)
+	BlockNumber(ctx context.Context) (uint64, error)
+	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
 }
 
 type L1Listener struct {
@@ -39,40 +39,48 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 	go func() {
 		defer close(doneChan)
 
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		currentBlockNo := 0
 		for {
-			headerChan := make(chan *types.Header)
-			sub, err := l.l1Client.SubscribeNewHead(ctx, headerChan)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				blockNum, err := l.l1Client.BlockNumber(ctx)
+				if err != nil {
+					log.Error().Err(err).Msg("failed to get block number")
+					continue
+				}
+
+				if blockNum <= uint64(currentBlockNo) {
+					continue
+				}
+
+				currentBlockNo = int(blockNum)
+				header, err := l.l1Client.HeaderByNumber(ctx, big.NewInt(int64(currentBlockNo)))
+				if err != nil {
+					log.Error().Err(err).Msg("failed to get header")
+					continue
+				}
+
+				winner := string(header.Extra)
+				err = l.winnerRegister.RegisterWinner(ctx, int64(currentBlockNo), winner)
+				if err != nil {
+					log.Error().Err(err).
+						Int64("block", int64(currentBlockNo)).
+						Msg("failed to register winner for block")
 					return
 				}
-				log.Error().Err(err).Msg("failed to subscribe to new headers")
-				time.Sleep(5 * time.Second)
-				continue
-			}
-			defer sub.Unsubscribe()
 
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case header := <-headerChan:
-					winner := string(header.Extra)
-					err := l.winnerRegister.RegisterWinner(ctx, header.Number.Int64(), winner)
-					if err != nil {
-						log.Error().Err(err).
-							Int64("block", header.Number.Int64()).
-							Msg("failed to register winner for block")
-						return
-					}
-
-					log.Info().
-						Str("winner", winner).
-						Int64("block", header.Number.Int64()).
-						Msg("registered winner")
-				}
+				log.Info().
+					Str("winner", winner).
+					Int64("block", header.Number.Int64()).
+					Msg("registered winner")
 			}
 		}
+
 	}()
 
 	return doneChan

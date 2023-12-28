@@ -14,7 +14,6 @@ import (
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -267,32 +266,23 @@ type testL1Client struct {
 	*ethclient.Client
 }
 
-func (t *testL1Client) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
-	tChan := make(chan *types.Header)
-	sub, err := t.Client.SubscribeNewHead(ctx, tChan)
+func (t *testL1Client) BlockNumber(ctx context.Context) (uint64, error) {
+	blkNum, err := t.Client.BlockNumber(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return blkNum - 10, nil
+}
+
+func (t *testL1Client) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+	hdr, err := t.Client.HeaderByNumber(ctx, number)
 	if err != nil {
 		return nil, err
 	}
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case header := <-tChan:
-				hdr, err := t.Client.HeaderByNumber(ctx, big.NewInt(0).Sub(header.Number, big.NewInt(10)))
-				if err != nil {
-					log.Error().Err(err).Msg("Error getting header")
-					continue
-				}
+	idx := number.Int64() % int64(len(chaintracer.IntegrationTestBuilders))
+	hdr.Extra = []byte(chaintracer.IntegrationTestBuilders[idx])
 
-				idx := hdr.Number.Int64() % int64(len(chaintracer.IntegrationTestBuilders))
-				hdr.Extra = []byte(chaintracer.IntegrationTestBuilders[idx])
-
-				ch <- hdr
-			}
-		}
-	}()
-
-	return sub, nil
+	return hdr, nil
 }

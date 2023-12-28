@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS settlements (
 );`
 
 var winnersTable = `
-CREATE TABLE winners (
+CREATE TABLE IF NOT EXISTS winners (
     block_number BIGINT PRIMARY KEY,
     builder_address BYTEA,
     processed BOOLEAN

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"sync"
 	"time"
 
 	"database/sql"
@@ -89,9 +90,12 @@ type Authenticator struct {
 	PrivateKey *ecdsa.PrivateKey
 	ChainID    *big.Int
 	Client     *ethclient.Client
+	lock       sync.Mutex
 }
 
 func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
+	a.lock.Lock()
+	defer a.lock.Unlock()
 	// Set transaction opts
 	auth, err := bind.NewKeyedTransactorWithChainID(a.PrivateKey, a.ChainID)
 	if err != nil {
@@ -109,7 +113,7 @@ func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
 	if err != nil {
 		return nil, err
 	}
-	auth.GasPrice = gasPrice.Mul(gasPrice, big.NewInt(2))
+	auth.GasPrice = gasPrice.Mul(gasPrice, big.NewInt(4))
 
 	// Set gas limit (you need to estimate or set a fixed value)
 	auth.GasLimit = uint64(30000000)
@@ -231,7 +235,9 @@ func run() (err error) {
 	})
 
 	workChannel := make(chan SettlementWork, 100)
-	go settler(ctx, authenticator, workChannel)
+	for i := 0; i < 10; i++ {
+		go settler(ctx, authenticator, workChannel)
+	}
 	defer close(workChannel)
 
 	for blockNumber := tracer.GetNextBlockNumber(ctx); ; blockNumber = tracer.GetNextBlockNumber(ctx) {

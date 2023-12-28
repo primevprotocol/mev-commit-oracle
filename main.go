@@ -227,22 +227,14 @@ func run() (err error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var (
-		selector         func(*types.Header) string
-		listenerL1Client l1Listener.EthClient
-	)
+	var listenerL1Client l1Listener.EthClient
 	if *integrationTestMode {
-		selector = func(header *types.Header) string {
-			idx := header.Number.Int64() % int64(len(chaintracer.IntegrationTestBuilders))
-			return chaintracer.IntegrationTestBuilders[idx]
-		}
 		listenerL1Client = &testL1Client{Client: l1Client}
 	} else {
 		listenerL1Client = l1Client
-		selector = nil
 	}
 
-	l1Lis := l1Listener.NewL1Listener(listenerL1Client, st, selector)
+	l1Lis := l1Listener.NewL1Listener(listenerL1Client, st)
 	updtr := updater.NewUpdater(owner, l1Client, st, pc, rc)
 	settlr := settler.NewSettler(rc, st, owner, client, privateKey, chainID)
 
@@ -293,6 +285,10 @@ func (t *testL1Client) SubscribeNewHead(ctx context.Context, ch chan<- *types.He
 					log.Error().Err(err).Msg("Error getting header")
 					continue
 				}
+
+				idx := hdr.Number.Int64() % int64(len(chaintracer.IntegrationTestBuilders))
+				hdr.Extra = []byte(chaintracer.IntegrationTestBuilders[idx])
+
 				ch <- hdr
 			}
 		}

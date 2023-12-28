@@ -21,18 +21,15 @@ type EthClient interface {
 type L1Listener struct {
 	l1Client       EthClient
 	winnerRegister WinnerRegister
-	selector       func(header *types.Header) string
 }
 
 func NewL1Listener(
 	l1Client EthClient,
 	winnerRegister WinnerRegister,
-	selector func(header *types.Header) string,
 ) *L1Listener {
 	return &L1Listener{
 		l1Client:       l1Client,
 		winnerRegister: winnerRegister,
-		selector:       selector,
 	}
 }
 
@@ -60,9 +57,6 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 					return
 				case header := <-headerChan:
 					winner := string(header.Extra)
-					if l.selector != nil {
-						winner = l.selector(header)
-					}
 					err := l.winnerRegister.RegisterWinner(ctx, header.Number.Int64(), winner)
 					if err != nil {
 						log.Error().Err(err).

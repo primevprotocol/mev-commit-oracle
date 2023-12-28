@@ -46,6 +46,7 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
+				log.Error().Err(err).Msg("failed to subscribe to new headers")
 				time.Sleep(5 * time.Second)
 				continue
 			}

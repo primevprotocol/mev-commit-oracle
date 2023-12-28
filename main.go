@@ -91,6 +91,7 @@ type Authenticator struct {
 	ChainID    *big.Int
 	Client     *ethclient.Client
 	lock       sync.Mutex
+	Nonce      *big.Int
 }
 
 func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
@@ -101,13 +102,13 @@ func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
 	if err != nil {
 		return nil, err
 	}
-	// Set nonce (optional)
-	nonce, err := client.PendingNonceAt(context.Background(), auth.From)
-	if err != nil {
-		return nil, err
-	}
-	auth.Nonce = big.NewInt(int64(nonce))
-
+	// // Set nonce (optional)
+	// nonce, err := client.PendingNonceAt(context.Background(), auth.From)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	auth.Nonce = a.Nonce
+	a.Nonce = a.Nonce.Add(a.Nonce, big.NewInt(1))
 	// Set gas price (optional)
 	gasPrice, err := a.Client.SuggestGasPrice(context.Background())
 	if err != nil {
@@ -203,6 +204,7 @@ func run() (err error) {
 		PrivateKey: privateKey,
 		ChainID:    chainID,
 		Client:     client,
+		Nonce:      big.NewInt(0),
 	}
 	if *integreationTestMode {
 		log.Info().Msg("Integration Test Mode Enabled. Setting fake builder mapping")
@@ -234,8 +236,8 @@ func run() (err error) {
 		IntegrationMode:     *integreationTestMode,
 	})
 
-	workChannel := make(chan SettlementWork, 100)
-	for i := 0; i < 10; i++ {
+	workChannel := make(chan SettlementWork, 500)
+	for i := 0; i < 20; i++ {
 		go settler(ctx, authenticator, workChannel)
 	}
 	defer close(workChannel)

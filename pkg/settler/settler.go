@@ -126,11 +126,6 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 				continue
 			}
 
-			log.Info().
-				Uint64("blockNum", currentBlock).
-				Uint64("lastNonce", lastNonce).
-				Msg("marked settlement complete")
-
 			lastBlock = currentBlock
 		}
 

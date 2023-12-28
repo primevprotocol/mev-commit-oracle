@@ -91,18 +91,6 @@ type Authenticator struct {
 	ChainID    *big.Int
 	Client     *ethclient.Client
 	lock       sync.Mutex
-	Nonce      *big.Int
-}
-
-func (a Authenticator) SetPendingNonce() error {
-	auth, err := bind.NewKeyedTransactorWithChainID(a.PrivateKey, a.ChainID)
-	if err != nil {
-		return err
-	}
-	nonce, err := client.PendingNonceAt(context.Background(), auth.From)
-	a.Nonce = big.NewInt(int64(nonce))
-
-	return nil
 }
 
 func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
@@ -113,13 +101,11 @@ func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
 	}
 	// Set nonce (optional)
 	// TODO(@ckartik): This should really only be needed once
-	// nonce, err := client.PendingNonceAt(context.Background(), auth.From)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	auth.Nonce = big.NewInt(a.Nonce.Int64())
-	a.Nonce.Add(a.Nonce, big.NewInt(1))
-
+	nonce, err := client.PendingNonceAt(context.Background(), auth.From)
+	if err != nil {
+		return nil, err
+	}
+	auth.Nonce = big.NewInt(int64(nonce))
 	// Set gas price (optional)
 	gasPrice, err := a.Client.SuggestGasPrice(context.Background())
 	if err != nil {
@@ -215,11 +201,6 @@ func run() (err error) {
 		PrivateKey: privateKey,
 		ChainID:    chainID,
 		Client:     client,
-		Nonce:      big.NewInt(0),
-	}
-	err = authenticator.SetPendingNonce()
-	if err != nil {
-		return err
 	}
 	if *integreationTestMode {
 		log.Info().Msg("Integration Test Mode Enabled. Setting fake builder mapping")

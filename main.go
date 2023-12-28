@@ -14,6 +14,7 @@ import (
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -226,15 +227,22 @@ func run() (err error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var selector func(*types.Header) string
+	var (
+		selector         func(*types.Header) string
+		listenerL1Client l1Listener.EthClient
+	)
 	if *integrationTestMode {
 		selector = func(header *types.Header) string {
 			idx := header.Number.Int64() % int64(len(chaintracer.IntegrationTestBuilders))
 			return chaintracer.IntegrationTestBuilders[idx]
 		}
+		listenerL1Client = &testL1Client{Client: l1Client}
+	} else {
+		listenerL1Client = l1Client
+		selector = nil
 	}
 
-	l1Lis := l1Listener.NewL1Listener(l1Client, st, selector)
+	l1Lis := l1Listener.NewL1Listener(listenerL1Client, st, selector)
 	updtr := updater.NewUpdater(owner, l1Client, st, pc, rc)
 	settlr := settler.NewSettler(rc, st, owner, client, privateKey, chainID)
 
@@ -261,4 +269,34 @@ func getEthAddressFromPubKey(key *ecdsa.PublicKey) common.Address {
 	address := hash.Sum(nil)[12:]
 
 	return common.BytesToAddress(address)
+}
+
+type testL1Client struct {
+	*ethclient.Client
+}
+
+func (t *testL1Client) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
+	tChan := make(chan *types.Header)
+	sub, err := t.Client.SubscribeNewHead(ctx, tChan)
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case header := <-tChan:
+				hdr, err := t.Client.HeaderByNumber(ctx, big.NewInt(0).Sub(header.Number, big.NewInt(10)))
+				if err != nil {
+					log.Error().Err(err).Msg("Error getting header")
+					continue
+				}
+				ch <- hdr
+			}
+		}
+	}()
+
+	return sub, nil
 }

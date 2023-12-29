@@ -114,6 +114,12 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 						return fmt.Errorf("failed to get commitments by block number: %w", err)
 					}
 
+					log.Debug().
+						Int("commitments_count", len(commitmentIndexes)).
+						Int("txns_count", len(txnsInBlock)).
+						Int64("blockNumber", winner.BlockNumber).
+						Msg("commitment indexes")
+
 					count := 0
 					for _, index := range commitmentIndexes {
 						commitment, err := u.preconfClient.GetCommitment(u.getCallOpts(ctx), index)

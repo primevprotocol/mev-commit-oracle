@@ -48,6 +48,7 @@ var (
 	dbHost          = flag.String("dbHost", "oracle-db", "DB Host")
 	// TODO(@ckartik): Pull txns commited to from DB and post in Oracle payload.
 	integrationTestMode = flag.Bool("integrationTestMode", false, "Integration Test Mode")
+	setBuilderMapping   = flag.Bool("setBuilderMapping", false, "Set Builder Mapping")
 
 	client   *ethclient.Client
 	l1Client *ethclient.Client
@@ -107,7 +108,7 @@ func (a Authenticator) GetAuth() (opts *bind.TransactOpts, err error) {
 	if err != nil {
 		return nil, err
 	}
-	auth.GasPrice = gasPrice.Mul(gasPrice, big.NewInt(4))
+	auth.GasPrice = gasPrice
 
 	// Set gas limit (you need to estimate or set a fixed value)
 	auth.GasLimit = uint64(30000000)
@@ -203,7 +204,7 @@ func run() (err error) {
 		Client:     client,
 	}
 
-	if *integrationTestMode {
+	if *integrationTestMode && *setBuilderMapping {
 		log.Info().Msg("Integration Test Mode Enabled. Setting fake builder mapping")
 		for _, builder := range chaintracer.IntegrationTestBuilders {
 			_, err = SetBuilderMapping(authenticator, builder, builder)

@@ -97,7 +97,11 @@ func (s *Store) SubscribeWinners(ctx context.Context) <-chan updater.BlockWinner
 				if err != nil {
 					continue RETRY
 				}
-				resChan <- bWinner
+				select {
+				case <-ctx.Done():
+					return
+				case resChan <- bWinner:
+				}
 			}
 
 			select {
@@ -174,7 +178,11 @@ func (s *Store) SubscribeSettlements(ctx context.Context) <-chan settler.Settlem
 					continue RETRY
 				}
 
-				resChan <- s
+				select {
+				case <-ctx.Done():
+					return
+				case resChan <- s:
+				}
 			}
 
 			select {
@@ -207,16 +215,20 @@ func (s *Store) SettlementInitiated(
 	return nil
 }
 
-func (s *Store) MarkSettlementComplete(ctx context.Context, nonce uint64) error {
-	_, err := s.db.ExecContext(
+func (s *Store) MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error) {
+	result, err := s.db.ExecContext(
 		ctx,
 		"UPDATE settlements SET settled = true WHERE nonce < $1 AND chainhash IS NOT NULL",
 		nonce,
 	)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return nil
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
 }
 
 func (s *Store) LastNonce() (int64, error) {
@@ -226,4 +238,14 @@ func (s *Store) LastNonce() (int64, error) {
 		return 0, err
 	}
 	return lastNonce, nil
+}
+
+func (s *Store) PendingTxCount() (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM settlements WHERE chainhash IS NOT NULL AND settled = false").
+		Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }

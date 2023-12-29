@@ -3,6 +3,7 @@ package settler
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"math/big"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
+)
+
+var (
+	allowedPendingTxnCount = 128
 )
 
 type Settlement struct {
@@ -23,9 +28,10 @@ type Settlement struct {
 
 type SettlerRegister interface {
 	LastNonce() (int64, error)
+	PendingTxnCount() (int, error)
 	SubscribeSettlements(ctx context.Context) <-chan Settlement
 	SettlementInitiated(ctx context.Context, commitmentIdx []byte, txHash common.Hash, nonce uint64) error
-	MarkSettlementComplete(ctx context.Context, nonce uint64) error
+	MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error)
 }
 
 type Settler struct {
@@ -55,12 +61,12 @@ func NewSettler(
 	}
 }
 
-func (s *Settler) getTransactOpts() (*bind.TransactOpts, error) {
+func (s *Settler) getTransactOpts(ctx context.Context) (*bind.TransactOpts, error) {
 	auth, err := bind.NewKeyedTransactorWithChainID(s.privateKey, s.chainID)
 	if err != nil {
 		return nil, err
 	}
-	nonce, err := s.client.PendingNonceAt(context.Background(), auth.From)
+	nonce, err := s.client.PendingNonceAt(ctx, auth.From)
 	if err != nil {
 		return nil, err
 	}
@@ -72,15 +78,21 @@ func (s *Settler) getTransactOpts() (*bind.TransactOpts, error) {
 		nonce = uint64(usedNonce + 1)
 	}
 	auth.Nonce = big.NewInt(int64(nonce))
-	// Set gas price (optional)
-	gasPrice, err := s.client.SuggestGasPrice(context.Background())
+
+	gasTip, err := s.client.SuggestGasTipCap(ctx)
 	if err != nil {
 		return nil, err
 	}
-	auth.GasPrice = gasPrice.Mul(gasPrice, big.NewInt(4))
 
-	// Set gas limit (you need to estimate or set a fixed value)
-	auth.GasLimit = uint64(30000000)
+	gasPrice, err := s.client.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	gasFeeCap := new(big.Int).Add(gasTip, gasPrice)
+
+	auth.GasFeeCap = gasFeeCap
+	auth.GasTipCap = gasTip
 
 	return auth, nil
 }
@@ -120,10 +132,14 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 				continue
 			}
 
-			err = s.settlerRegister.MarkSettlementComplete(ctx, lastNonce)
+			count, err := s.settlerRegister.MarkSettlementComplete(ctx, lastNonce)
 			if err != nil {
 				log.Error().Err(err).Msg("failed to mark settlement complete")
 				continue
+			}
+
+			if count > 0 {
+				log.Info().Int("count", count).Msg("marked settlement complete")
 			}
 
 			lastBlock = currentBlock
@@ -134,59 +150,74 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 	go func() {
 		defer close(doneChan)
 
-		settlementChan := s.settlerRegister.SubscribeSettlements(ctx)
+	RESTART:
+		cctx, unsub := context.WithCancel(ctx)
+		settlementChan := s.settlerRegister.SubscribeSettlements(cctx)
 
-		settledBlk := 0
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case settlement := <-settlementChan:
-				if settlement.BlockNum > int64(settledBlk) {
-					if settledBlk != 0 {
-						log.Info().Msg("moving to next block for settlements")
+			case settlement, more := <-settlementChan:
+				if !more {
+					unsub()
+					goto RESTART
+				}
+
+				err := func() error {
+					pendingTxns, err := s.settlerRegister.PendingTxnCount()
+					if err != nil {
+						return err
 					}
-					settledBlk = int(settlement.BlockNum)
-				}
 
-				opts, err := s.getTransactOpts()
-				if err != nil {
-					log.Error().Err(err).Msg("failed to get transact opts")
-					continue
-				}
+					if pendingTxns > allowedPendingTxnCount {
+						time.Sleep(5 * time.Second)
+						return errors.New("too many pending txns")
+					}
 
-				var commitmentIdx [32]byte
-				copy(commitmentIdx[:], settlement.CommitmentIdx)
+					opts, err := s.getTransactOpts(ctx)
+					if err != nil {
+						return err
+					}
 
-				commitmentPostingTxn, err := s.rollupClient.ProcessBuilderCommitmentForBlockNumber(
-					opts,
-					commitmentIdx,
-					big.NewInt(settlement.BlockNum),
-					settlement.Builder,
-					settlement.IsSlash,
-				)
+					var commitmentIdx [32]byte
+					copy(commitmentIdx[:], settlement.CommitmentIdx)
+
+					commitmentPostingTxn, err := s.rollupClient.ProcessBuilderCommitmentForBlockNumber(
+						opts,
+						commitmentIdx,
+						big.NewInt(settlement.BlockNum),
+						settlement.Builder,
+						settlement.IsSlash,
+					)
+					if err != nil {
+						return err
+					}
+
+					err = s.settlerRegister.SettlementInitiated(
+						ctx,
+						settlement.CommitmentIdx,
+						commitmentPostingTxn.Hash(),
+						commitmentPostingTxn.Nonce(),
+					)
+					if err != nil {
+						return err
+					}
+
+					log.Info().
+						Int64("blockNum", settlement.BlockNum).
+						Str("txHash", commitmentPostingTxn.Hash().Hex()).
+						Str("builder", settlement.Builder).
+						Bool("isSlash", settlement.IsSlash).
+						Msg("builder commitment processed")
+
+					return nil
+				}()
 				if err != nil {
 					log.Error().Err(err).Msg("failed to process builder commitment")
-					continue
+					unsub()
+					goto RESTART
 				}
-
-				err = s.settlerRegister.SettlementInitiated(
-					ctx,
-					settlement.CommitmentIdx,
-					commitmentPostingTxn.Hash(),
-					commitmentPostingTxn.Nonce(),
-				)
-				if err != nil {
-					log.Error().Err(err).Msg("failed to mark settlement initiated")
-					continue
-				}
-
-				log.Info().
-					Int64("blockNum", settlement.BlockNum).
-					Str("txHash", commitmentPostingTxn.Hash().Hex()).
-					Str("builder", settlement.Builder).
-					Bool("isSlash", settlement.IsSlash).
-					Msg("builder commitment processed")
 			}
 		}
 	}()

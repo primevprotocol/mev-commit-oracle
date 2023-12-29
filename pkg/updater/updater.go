@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -70,82 +71,95 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 	go func() {
 		defer close(doneChan)
 
-		winnerChan := u.winnerRegister.SubscribeWinners(ctx)
+	RESTART:
+		cctx, unsub := context.WithCancel(ctx)
+		winnerChan := u.winnerRegister.SubscribeWinners(cctx)
 
-	WINNER_LOOP:
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case winner := <-winnerChan:
-				var err error
-				builderAddr, ok := u.builderIdentityCache[winner.Winner]
-				if !ok {
-					builderAddr, err = u.rollupClient.GetBuilder(u.getCallOpts(ctx), winner.Winner)
-					if err != nil {
-						log.Error().Err(err).Msg("failed to get builder address")
-						continue
-					}
-					u.builderIdentityCache[winner.Winner] = builderAddr
+			case winner, more := <-winnerChan:
+				if !more {
+					unsub()
+					goto RESTART
 				}
 
-				blk, err := u.l1Client.BlockByNumber(ctx, big.NewInt(winner.BlockNumber))
-				if err != nil {
-					log.Error().Err(err).Msg("failed to get block by number")
-					continue
-				}
-
-				txnsInBlock := make(map[string]struct{})
-				for _, tx := range blk.Transactions() {
-					txnsInBlock[tx.Hash().Hex()] = struct{}{}
-				}
-
-				commitmentIndexes, err := u.preconfClient.GetCommitmentsByBlockNumber(
-					u.getCallOpts(ctx),
-					big.NewInt(winner.BlockNumber),
-				)
-				if err != nil {
-					log.Error().Err(err).Msg("failed to get commitments by block number")
-					continue
-				}
-
-				count := 0
-				for _, index := range commitmentIndexes {
-					commitment, err := u.preconfClient.GetCommitment(u.getCallOpts(ctx), index)
-					if err != nil {
-						log.Error().Err(err).Msg("failed to get commitment")
-						continue WINNER_LOOP
-					}
-
-					if commitment.Commiter.Cmp(builderAddr) == 0 {
-						_, ok := txnsInBlock[commitment.TxnHash]
-						err = u.winnerRegister.AddSettlement(
-							ctx,
-							index[:],
-							commitment.TxnHash,
-							winner.BlockNumber,
-							winner.Winner,
-							!ok,
-						)
+				err := func() error {
+					var err error
+					builderAddr, ok := u.builderIdentityCache[winner.Winner]
+					if !ok {
+						builderAddr, err = u.rollupClient.GetBuilder(u.getCallOpts(ctx), winner.Winner)
 						if err != nil {
-							log.Error().Err(err).Msg("failed to add settlement")
-							continue WINNER_LOOP
+							return fmt.Errorf("failed to get builder address: %w", err)
 						}
-						count++
+						u.builderIdentityCache[winner.Winner] = builderAddr
 					}
-				}
 
-				err = u.winnerRegister.UpdateComplete(ctx, winner.BlockNumber)
+					blk, err := u.l1Client.BlockByNumber(ctx, big.NewInt(winner.BlockNumber))
+					if err != nil {
+						return fmt.Errorf("failed to get block by number: %w", err)
+					}
+
+					txnsInBlock := make(map[string]struct{})
+					for _, tx := range blk.Transactions() {
+						txnsInBlock[tx.Hash().Hex()] = struct{}{}
+					}
+
+					commitmentIndexes, err := u.preconfClient.GetCommitmentsByBlockNumber(
+						u.getCallOpts(ctx),
+						big.NewInt(winner.BlockNumber),
+					)
+					if err != nil {
+						return fmt.Errorf("failed to get commitments by block number: %w", err)
+					}
+
+					count := 0
+					for _, index := range commitmentIndexes {
+						commitment, err := u.preconfClient.GetCommitment(u.getCallOpts(ctx), index)
+						if err != nil {
+							return fmt.Errorf("failed to get commitment: %w", err)
+						}
+
+						if commitment.Commiter.Cmp(builderAddr) == 0 {
+							_, ok := txnsInBlock[commitment.TxnHash]
+							err = u.winnerRegister.AddSettlement(
+								ctx,
+								index[:],
+								commitment.TxnHash,
+								winner.BlockNumber,
+								winner.Winner,
+								!ok,
+							)
+							if err != nil {
+								return fmt.Errorf("failed to add settlement: %w", err)
+							}
+							count++
+						}
+					}
+
+					err = u.winnerRegister.UpdateComplete(ctx, winner.BlockNumber)
+					if err != nil {
+						return fmt.Errorf("failed to update completion of block updates: %w", err)
+					}
+
+					log.Info().
+						Int("count", count).
+						Int64("blockNumber", winner.BlockNumber).
+						Str("winner", winner.Winner).
+						Msg("added settlements")
+
+					return nil
+				}()
+
 				if err != nil {
-					log.Error().Err(err).Msg("failed to update completion of block updates")
+					log.Error().Err(err).
+						Int64("blockNumber", winner.BlockNumber).
+						Str("winner", winner.Winner).
+						Msg("failed to process settlements")
+					unsub()
+					goto RESTART
 				}
-
-				log.Info().
-					Int("count", count).
-					Int64("blockNumber", winner.BlockNumber).
-					Str("winner", winner.Winner).
-					Msg("added settlements")
-
 			}
 		}
 	}()

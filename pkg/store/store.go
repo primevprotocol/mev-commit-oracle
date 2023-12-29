@@ -240,7 +240,7 @@ func (s *Store) LastNonce() (int64, error) {
 	return lastNonce, nil
 }
 
-func (s *Store) PendingTxCount() (int, error) {
+func (s *Store) PendingTxnCount() (int, error) {
 	var count int
 	err := s.db.QueryRow("SELECT COUNT(*) FROM settlements WHERE chainhash IS NOT NULL AND settled = false").
 		Scan(&count)

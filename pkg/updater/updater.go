@@ -125,7 +125,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 							commitment.TxnHash,
 							winner.BlockNumber,
 							winner.Winner,
-							ok,
+							!ok,
 						)
 						if err != nil {
 							log.Error().Err(err).Msg("failed to add settlement")

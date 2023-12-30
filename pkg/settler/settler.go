@@ -9,8 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/rs/zerolog/log"
 )
 
@@ -34,22 +33,38 @@ type SettlerRegister interface {
 	MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error)
 }
 
+type Oracle interface {
+	ProcessBuilderCommitmentForBlockNumber(
+		opts *bind.TransactOpts,
+		commitmentIdx [32]byte,
+		blockNum *big.Int,
+		builder string,
+		isSlash bool,
+	) (*types.Transaction, error)
+}
+
+type Transactor interface {
+	bind.ContractTransactor
+	NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error)
+	BlockNumber(ctx context.Context) (uint64, error)
+}
+
 type Settler struct {
-	rollupClient    *rollupclient.OracleClient
-	settlerRegister SettlerRegister
-	owner           common.Address
-	client          *ethclient.Client
 	privateKey      *ecdsa.PrivateKey
 	chainID         *big.Int
+	owner           common.Address
+	rollupClient    Oracle
+	settlerRegister SettlerRegister
+	client          Transactor
 }
 
 func NewSettler(
-	rollupClient *rollupclient.OracleClient,
-	settlerRegister SettlerRegister,
-	owner common.Address,
-	client *ethclient.Client,
 	privateKey *ecdsa.PrivateKey,
 	chainID *big.Int,
+	owner common.Address,
+	rollupClient Oracle,
+	settlerRegister SettlerRegister,
+	client Transactor,
 ) *Settler {
 	return &Settler{
 		rollupClient:    rollupClient,

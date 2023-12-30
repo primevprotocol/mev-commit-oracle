@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/primevprotocol/mev-oracle/pkg/preconf"
-	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
 	"github.com/rs/zerolog/log"
 )
 
@@ -31,37 +29,39 @@ type WinnerRegister interface {
 	) error
 }
 
+type L1Client interface {
+	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
+}
+
+type Oracle interface {
+	GetBuilder(builder string) (common.Address, error)
+}
+
+type Preconf interface {
+	GetCommitmentsByBlockNumber(blockNum *big.Int) ([][32]byte, error)
+	GetCommitment(commitmentIdx [32]byte) (preconf.PreConfCommitmentStorePreConfCommitment, error)
+}
+
 type Updater struct {
-	owner                common.Address
-	l1Client             *ethclient.Client
+	l1Client             L1Client
 	winnerRegister       WinnerRegister
-	preconfClient        *preconf.Preconf
-	rollupClient         *rollupclient.OracleClient
+	preconfClient        Preconf
+	rollupClient         Oracle
 	builderIdentityCache map[string]common.Address
 }
 
 func NewUpdater(
-	owner common.Address,
-	l1Client *ethclient.Client,
+	l1Client L1Client,
 	winnerRegister WinnerRegister,
-	preconfClient *preconf.Preconf,
-	rollupClient *rollupclient.OracleClient,
+	rollupClient Oracle,
+	preconfClient Preconf,
 ) *Updater {
 	return &Updater{
-		owner:                owner,
 		l1Client:             l1Client,
 		winnerRegister:       winnerRegister,
 		preconfClient:        preconfClient,
 		rollupClient:         rollupClient,
 		builderIdentityCache: make(map[string]common.Address),
-	}
-}
-
-func (u *Updater) getCallOpts(ctx context.Context) *bind.CallOpts {
-	return &bind.CallOpts{
-		Pending: false,
-		From:    u.owner,
-		Context: ctx,
 	}
 }
 
@@ -89,7 +89,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 					var err error
 					builderAddr, ok := u.builderIdentityCache[winner.Winner]
 					if !ok {
-						builderAddr, err = u.rollupClient.GetBuilder(u.getCallOpts(ctx), winner.Winner)
+						builderAddr, err = u.rollupClient.GetBuilder(winner.Winner)
 						if err != nil {
 							return fmt.Errorf("failed to get builder address: %w", err)
 						}
@@ -107,7 +107,6 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 					}
 
 					commitmentIndexes, err := u.preconfClient.GetCommitmentsByBlockNumber(
-						u.getCallOpts(ctx),
 						big.NewInt(winner.BlockNumber),
 					)
 					if err != nil {
@@ -122,7 +121,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 
 					count := 0
 					for _, index := range commitmentIndexes {
-						commitment, err := u.preconfClient.GetCommitment(u.getCallOpts(ctx), index)
+						commitment, err := u.preconfClient.GetCommitment(index)
 						if err != nil {
 							return fmt.Errorf("failed to get commitment: %w", err)
 						}

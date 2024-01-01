@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: ./integrationtest/Dockerfile
     restart: always
+    environment:
+      - L1_URL=${L1_URL}
     networks:
       - primev_net
     labels:

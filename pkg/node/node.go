@@ -91,10 +91,6 @@ func NewNode(opts *Options) (*Node, error) {
 		listenerL1Client = &laggerdL1Client{EthClient: listenerL1Client, amount: opts.LaggerdMode}
 	}
 
-	if opts.OverrideWinners != nil && len(opts.OverrideWinners) > 0 {
-		listenerL1Client = &winnerOverrideL1Client{EthClient: listenerL1Client, winners: opts.OverrideWinners}
-	}
-
 	preconfContract, err := preconf.NewPreconfCaller(opts.PreconfContractAddr, settlementClient)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to instantiate preconf contract")
@@ -105,6 +101,25 @@ func NewNode(opts *Options) (*Node, error) {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to instantiate oracle contract")
 		return nil, err
+	}
+
+	if opts.OverrideWinners != nil && len(opts.OverrideWinners) > 0 {
+		listenerL1Client = &winnerOverrideL1Client{EthClient: listenerL1Client, winners: opts.OverrideWinners}
+		for _, winner := range opts.OverrideWinners {
+			err := setBuilderMapping(
+				ctx,
+				opts.PrivateKey,
+				chainID,
+				settlementClient,
+				oracleContract,
+				winner,
+				winner,
+			)
+			if err != nil {
+				log.Fatal().Err(err).Msg("failed to set builder mapping")
+				return nil, err
+			}
+		}
 	}
 
 	l1Lis := l1Listener.NewL1Listener(listenerL1Client, st)
@@ -237,4 +252,50 @@ func (w *winnerOverrideL1Client) HeaderByNumber(ctx context.Context, number *big
 	hdr.Extra = []byte(w.winners[idx])
 
 	return hdr, nil
+}
+
+func setBuilderMapping(
+	ctx context.Context,
+	privateKey *ecdsa.PrivateKey,
+	chainID *big.Int,
+	client *ethclient.Client,
+	rc *rollupclient.OracleClient,
+	builderName string,
+	builderAddress string,
+) error {
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+	if err != nil {
+		return err
+	}
+	nonce, err := client.PendingNonceAt(ctx, auth.From)
+	if err != nil {
+		return err
+	}
+	auth.Nonce = big.NewInt(int64(nonce))
+	gasTip, err := client.SuggestGasTipCap(ctx)
+	if err != nil {
+		return err
+	}
+
+	gasPrice, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return err
+	}
+
+	gasFeeCap := new(big.Int).Add(gasTip, gasPrice)
+
+	auth.GasFeeCap = gasFeeCap
+	auth.GasTipCap = gasTip
+
+	txn, err := rc.AddBuilderAddress(auth, builderName, common.HexToAddress(builderAddress))
+	if err != nil {
+		return err
+	}
+
+	_, err = bind.WaitMined(ctx, client, txn)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

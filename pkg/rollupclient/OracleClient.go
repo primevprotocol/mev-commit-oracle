@@ -29,113 +29,113 @@ var (
 	_ = abi.ConvertType
 )
 
-// RollupclientMetaData contains all meta data concerning the Rollupclient contract.
-var RollupclientMetaData = &bind.MetaData{
+// OracleClientMetaData contains all meta data concerning the OracleClient contract.
+var OracleClientMetaData = &bind.MetaData{
 	ABI: "[{\"type\":\"constructor\",\"inputs\":[{\"name\":\"_preConfContract\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"_nextRequestedBlockNumber\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"_owner\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"fallback\",\"stateMutability\":\"payable\"},{\"type\":\"receive\",\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"addBuilderAddress\",\"inputs\":[{\"name\":\"builderName\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"builderAddress\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"blockBuilderNameToAddress\",\"inputs\":[{\"name\":\"\",\"type\":\"string\",\"internalType\":\"string\"}],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getBuilder\",\"inputs\":[{\"name\":\"builderNameGrafiti\",\"type\":\"string\",\"internalType\":\"string\"}],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getNextRequestedBlockNumber\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"moveToNextBlock\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"nextRequestedBlockNumber\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"owner\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"processBuilderCommitmentForBlockNumber\",\"inputs\":[{\"name\":\"commitmentIndex\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"blockNumber\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"blockBuilderName\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"isSlash\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"renounceOwnership\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"setNextBlock\",\"inputs\":[{\"name\":\"newBlockNumber\",\"type\":\"uint64\",\"internalType\":\"uint64\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"transferOwnership\",\"inputs\":[{\"name\":\"newOwner\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"CommitmentProcessed\",\"inputs\":[{\"name\":\"commitmentHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"},{\"name\":\"isSlash\",\"type\":\"bool\",\"indexed\":false,\"internalType\":\"bool\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"inputs\":[{\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false}]",
 }
 
-// RollupclientABI is the input ABI used to generate the binding from.
-// Deprecated: Use RollupclientMetaData.ABI instead.
-var RollupclientABI = RollupclientMetaData.ABI
+// OracleClientABI is the input ABI used to generate the binding from.
+// Deprecated: Use OracleClientMetaData.ABI instead.
+var OracleClientABI = OracleClientMetaData.ABI
 
-// Rollupclient is an auto generated Go binding around an Ethereum contract.
-type Rollupclient struct {
-	RollupclientCaller     // Read-only binding to the contract
-	RollupclientTransactor // Write-only binding to the contract
-	RollupclientFilterer   // Log filterer for contract events
+// OracleClient is an auto generated Go binding around an Ethereum contract.
+type OracleClient struct {
+	OracleClientCaller     // Read-only binding to the contract
+	OracleClientTransactor // Write-only binding to the contract
+	OracleClientFilterer   // Log filterer for contract events
 }
 
-// RollupclientCaller is an auto generated read-only Go binding around an Ethereum contract.
-type RollupclientCaller struct {
+// OracleClientCaller is an auto generated read-only Go binding around an Ethereum contract.
+type OracleClientCaller struct {
 	contract *bind.BoundContract // Generic contract wrapper for the low level calls
 }
 
-// RollupclientTransactor is an auto generated write-only Go binding around an Ethereum contract.
-type RollupclientTransactor struct {
+// OracleClientTransactor is an auto generated write-only Go binding around an Ethereum contract.
+type OracleClientTransactor struct {
 	contract *bind.BoundContract // Generic contract wrapper for the low level calls
 }
 
-// RollupclientFilterer is an auto generated log filtering Go binding around an Ethereum contract events.
-type RollupclientFilterer struct {
+// OracleClientFilterer is an auto generated log filtering Go binding around an Ethereum contract events.
+type OracleClientFilterer struct {
 	contract *bind.BoundContract // Generic contract wrapper for the low level calls
 }
 
-// RollupclientSession is an auto generated Go binding around an Ethereum contract,
+// OracleClientSession is an auto generated Go binding around an Ethereum contract,
 // with pre-set call and transact options.
-type RollupclientSession struct {
-	Contract     *Rollupclient     // Generic contract binding to set the session for
+type OracleClientSession struct {
+	Contract     *OracleClient     // Generic contract binding to set the session for
 	CallOpts     bind.CallOpts     // Call options to use throughout this session
 	TransactOpts bind.TransactOpts // Transaction auth options to use throughout this session
 }
 
-// RollupclientCallerSession is an auto generated read-only Go binding around an Ethereum contract,
+// OracleClientCallerSession is an auto generated read-only Go binding around an Ethereum contract,
 // with pre-set call options.
-type RollupclientCallerSession struct {
-	Contract *RollupclientCaller // Generic contract caller binding to set the session for
+type OracleClientCallerSession struct {
+	Contract *OracleClientCaller // Generic contract caller binding to set the session for
 	CallOpts bind.CallOpts       // Call options to use throughout this session
 }
 
-// RollupclientTransactorSession is an auto generated write-only Go binding around an Ethereum contract,
+// OracleClientTransactorSession is an auto generated write-only Go binding around an Ethereum contract,
 // with pre-set transact options.
-type RollupclientTransactorSession struct {
-	Contract     *RollupclientTransactor // Generic contract transactor binding to set the session for
+type OracleClientTransactorSession struct {
+	Contract     *OracleClientTransactor // Generic contract transactor binding to set the session for
 	TransactOpts bind.TransactOpts       // Transaction auth options to use throughout this session
 }
 
-// RollupclientRaw is an auto generated low-level Go binding around an Ethereum contract.
-type RollupclientRaw struct {
-	Contract *Rollupclient // Generic contract binding to access the raw methods on
+// OracleClientRaw is an auto generated low-level Go binding around an Ethereum contract.
+type OracleClientRaw struct {
+	Contract *OracleClient // Generic contract binding to access the raw methods on
 }
 
-// RollupclientCallerRaw is an auto generated low-level read-only Go binding around an Ethereum contract.
-type RollupclientCallerRaw struct {
-	Contract *RollupclientCaller // Generic read-only contract binding to access the raw methods on
+// OracleClientCallerRaw is an auto generated low-level read-only Go binding around an Ethereum contract.
+type OracleClientCallerRaw struct {
+	Contract *OracleClientCaller // Generic read-only contract binding to access the raw methods on
 }
 
-// RollupclientTransactorRaw is an auto generated low-level write-only Go binding around an Ethereum contract.
-type RollupclientTransactorRaw struct {
-	Contract *RollupclientTransactor // Generic write-only contract binding to access the raw methods on
+// OracleClientTransactorRaw is an auto generated low-level write-only Go binding around an Ethereum contract.
+type OracleClientTransactorRaw struct {
+	Contract *OracleClientTransactor // Generic write-only contract binding to access the raw methods on
 }
 
-// NewRollupclient creates a new instance of Rollupclient, bound to a specific deployed contract.
-func NewRollupclient(address common.Address, backend bind.ContractBackend) (*Rollupclient, error) {
-	contract, err := bindRollupclient(address, backend, backend, backend)
+// NewOracleClient creates a new instance of OracleClient, bound to a specific deployed contract.
+func NewOracleClient(address common.Address, backend bind.ContractBackend) (*OracleClient, error) {
+	contract, err := bindOracleClient(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
 	}
-	return &Rollupclient{RollupclientCaller: RollupclientCaller{contract: contract}, RollupclientTransactor: RollupclientTransactor{contract: contract}, RollupclientFilterer: RollupclientFilterer{contract: contract}}, nil
+	return &OracleClient{OracleClientCaller: OracleClientCaller{contract: contract}, OracleClientTransactor: OracleClientTransactor{contract: contract}, OracleClientFilterer: OracleClientFilterer{contract: contract}}, nil
 }
 
-// NewRollupclientCaller creates a new read-only instance of Rollupclient, bound to a specific deployed contract.
-func NewRollupclientCaller(address common.Address, caller bind.ContractCaller) (*RollupclientCaller, error) {
-	contract, err := bindRollupclient(address, caller, nil, nil)
+// NewOracleClientCaller creates a new read-only instance of OracleClient, bound to a specific deployed contract.
+func NewOracleClientCaller(address common.Address, caller bind.ContractCaller) (*OracleClientCaller, error) {
+	contract, err := bindOracleClient(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return &RollupclientCaller{contract: contract}, nil
+	return &OracleClientCaller{contract: contract}, nil
 }
 
-// NewRollupclientTransactor creates a new write-only instance of Rollupclient, bound to a specific deployed contract.
-func NewRollupclientTransactor(address common.Address, transactor bind.ContractTransactor) (*RollupclientTransactor, error) {
-	contract, err := bindRollupclient(address, nil, transactor, nil)
+// NewOracleClientTransactor creates a new write-only instance of OracleClient, bound to a specific deployed contract.
+func NewOracleClientTransactor(address common.Address, transactor bind.ContractTransactor) (*OracleClientTransactor, error) {
+	contract, err := bindOracleClient(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
 	}
-	return &RollupclientTransactor{contract: contract}, nil
+	return &OracleClientTransactor{contract: contract}, nil
 }
 
-// NewRollupclientFilterer creates a new log filterer instance of Rollupclient, bound to a specific deployed contract.
-func NewRollupclientFilterer(address common.Address, filterer bind.ContractFilterer) (*RollupclientFilterer, error) {
-	contract, err := bindRollupclient(address, nil, nil, filterer)
+// NewOracleClientFilterer creates a new log filterer instance of OracleClient, bound to a specific deployed contract.
+func NewOracleClientFilterer(address common.Address, filterer bind.ContractFilterer) (*OracleClientFilterer, error) {
+	contract, err := bindOracleClient(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
 	}
-	return &RollupclientFilterer{contract: contract}, nil
+	return &OracleClientFilterer{contract: contract}, nil
 }
 
-// bindRollupclient binds a generic wrapper to an already deployed contract.
-func bindRollupclient(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
-	parsed, err := RollupclientMetaData.GetAbi()
+// bindOracleClient binds a generic wrapper to an already deployed contract.
+func bindOracleClient(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+	parsed, err := OracleClientMetaData.GetAbi()
 	if err != nil {
 		return nil, err
 	}
@@ -146,46 +146,46 @@ func bindRollupclient(address common.Address, caller bind.ContractCaller, transa
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Rollupclient *RollupclientRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
-	return _Rollupclient.Contract.RollupclientCaller.contract.Call(opts, result, method, params...)
+func (_OracleClient *OracleClientRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+	return _OracleClient.Contract.OracleClientCaller.contract.Call(opts, result, method, params...)
 }
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Rollupclient *RollupclientRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _Rollupclient.Contract.RollupclientTransactor.contract.Transfer(opts)
+func (_OracleClient *OracleClientRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _OracleClient.Contract.OracleClientTransactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Rollupclient *RollupclientRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
-	return _Rollupclient.Contract.RollupclientTransactor.contract.Transact(opts, method, params...)
+func (_OracleClient *OracleClientRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+	return _OracleClient.Contract.OracleClientTransactor.contract.Transact(opts, method, params...)
 }
 
 // Call invokes the (constant) contract method with params as input values and
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Rollupclient *RollupclientCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
-	return _Rollupclient.Contract.contract.Call(opts, result, method, params...)
+func (_OracleClient *OracleClientCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+	return _OracleClient.Contract.contract.Call(opts, result, method, params...)
 }
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Rollupclient *RollupclientTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _Rollupclient.Contract.contract.Transfer(opts)
+func (_OracleClient *OracleClientTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _OracleClient.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Rollupclient *RollupclientTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
-	return _Rollupclient.Contract.contract.Transact(opts, method, params...)
+func (_OracleClient *OracleClientTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+	return _OracleClient.Contract.contract.Transact(opts, method, params...)
 }
 
 // BlockBuilderNameToAddress is a free data retrieval call binding the contract method 0xeebac3ac.
 //
 // Solidity: function blockBuilderNameToAddress(string ) view returns(address)
-func (_Rollupclient *RollupclientCaller) BlockBuilderNameToAddress(opts *bind.CallOpts, arg0 string) (common.Address, error) {
+func (_OracleClient *OracleClientCaller) BlockBuilderNameToAddress(opts *bind.CallOpts, arg0 string) (common.Address, error) {
 	var out []interface{}
-	err := _Rollupclient.contract.Call(opts, &out, "blockBuilderNameToAddress", arg0)
+	err := _OracleClient.contract.Call(opts, &out, "blockBuilderNameToAddress", arg0)
 
 	if err != nil {
 		return *new(common.Address), err
@@ -200,23 +200,23 @@ func (_Rollupclient *RollupclientCaller) BlockBuilderNameToAddress(opts *bind.Ca
 // BlockBuilderNameToAddress is a free data retrieval call binding the contract method 0xeebac3ac.
 //
 // Solidity: function blockBuilderNameToAddress(string ) view returns(address)
-func (_Rollupclient *RollupclientSession) BlockBuilderNameToAddress(arg0 string) (common.Address, error) {
-	return _Rollupclient.Contract.BlockBuilderNameToAddress(&_Rollupclient.CallOpts, arg0)
+func (_OracleClient *OracleClientSession) BlockBuilderNameToAddress(arg0 string) (common.Address, error) {
+	return _OracleClient.Contract.BlockBuilderNameToAddress(&_OracleClient.CallOpts, arg0)
 }
 
 // BlockBuilderNameToAddress is a free data retrieval call binding the contract method 0xeebac3ac.
 //
 // Solidity: function blockBuilderNameToAddress(string ) view returns(address)
-func (_Rollupclient *RollupclientCallerSession) BlockBuilderNameToAddress(arg0 string) (common.Address, error) {
-	return _Rollupclient.Contract.BlockBuilderNameToAddress(&_Rollupclient.CallOpts, arg0)
+func (_OracleClient *OracleClientCallerSession) BlockBuilderNameToAddress(arg0 string) (common.Address, error) {
+	return _OracleClient.Contract.BlockBuilderNameToAddress(&_OracleClient.CallOpts, arg0)
 }
 
 // GetBuilder is a free data retrieval call binding the contract method 0x237ba8fb.
 //
 // Solidity: function getBuilder(string builderNameGrafiti) view returns(address)
-func (_Rollupclient *RollupclientCaller) GetBuilder(opts *bind.CallOpts, builderNameGrafiti string) (common.Address, error) {
+func (_OracleClient *OracleClientCaller) GetBuilder(opts *bind.CallOpts, builderNameGrafiti string) (common.Address, error) {
 	var out []interface{}
-	err := _Rollupclient.contract.Call(opts, &out, "getBuilder", builderNameGrafiti)
+	err := _OracleClient.contract.Call(opts, &out, "getBuilder", builderNameGrafiti)
 
 	if err != nil {
 		return *new(common.Address), err
@@ -231,23 +231,23 @@ func (_Rollupclient *RollupclientCaller) GetBuilder(opts *bind.CallOpts, builder
 // GetBuilder is a free data retrieval call binding the contract method 0x237ba8fb.
 //
 // Solidity: function getBuilder(string builderNameGrafiti) view returns(address)
-func (_Rollupclient *RollupclientSession) GetBuilder(builderNameGrafiti string) (common.Address, error) {
-	return _Rollupclient.Contract.GetBuilder(&_Rollupclient.CallOpts, builderNameGrafiti)
+func (_OracleClient *OracleClientSession) GetBuilder(builderNameGrafiti string) (common.Address, error) {
+	return _OracleClient.Contract.GetBuilder(&_OracleClient.CallOpts, builderNameGrafiti)
 }
 
 // GetBuilder is a free data retrieval call binding the contract method 0x237ba8fb.
 //
 // Solidity: function getBuilder(string builderNameGrafiti) view returns(address)
-func (_Rollupclient *RollupclientCallerSession) GetBuilder(builderNameGrafiti string) (common.Address, error) {
-	return _Rollupclient.Contract.GetBuilder(&_Rollupclient.CallOpts, builderNameGrafiti)
+func (_OracleClient *OracleClientCallerSession) GetBuilder(builderNameGrafiti string) (common.Address, error) {
+	return _OracleClient.Contract.GetBuilder(&_OracleClient.CallOpts, builderNameGrafiti)
 }
 
 // GetNextRequestedBlockNumber is a free data retrieval call binding the contract method 0xfce2a502.
 //
 // Solidity: function getNextRequestedBlockNumber() view returns(uint256)
-func (_Rollupclient *RollupclientCaller) GetNextRequestedBlockNumber(opts *bind.CallOpts) (*big.Int, error) {
+func (_OracleClient *OracleClientCaller) GetNextRequestedBlockNumber(opts *bind.CallOpts) (*big.Int, error) {
 	var out []interface{}
-	err := _Rollupclient.contract.Call(opts, &out, "getNextRequestedBlockNumber")
+	err := _OracleClient.contract.Call(opts, &out, "getNextRequestedBlockNumber")
 
 	if err != nil {
 		return *new(*big.Int), err
@@ -262,23 +262,23 @@ func (_Rollupclient *RollupclientCaller) GetNextRequestedBlockNumber(opts *bind.
 // GetNextRequestedBlockNumber is a free data retrieval call binding the contract method 0xfce2a502.
 //
 // Solidity: function getNextRequestedBlockNumber() view returns(uint256)
-func (_Rollupclient *RollupclientSession) GetNextRequestedBlockNumber() (*big.Int, error) {
-	return _Rollupclient.Contract.GetNextRequestedBlockNumber(&_Rollupclient.CallOpts)
+func (_OracleClient *OracleClientSession) GetNextRequestedBlockNumber() (*big.Int, error) {
+	return _OracleClient.Contract.GetNextRequestedBlockNumber(&_OracleClient.CallOpts)
 }
 
 // GetNextRequestedBlockNumber is a free data retrieval call binding the contract method 0xfce2a502.
 //
 // Solidity: function getNextRequestedBlockNumber() view returns(uint256)
-func (_Rollupclient *RollupclientCallerSession) GetNextRequestedBlockNumber() (*big.Int, error) {
-	return _Rollupclient.Contract.GetNextRequestedBlockNumber(&_Rollupclient.CallOpts)
+func (_OracleClient *OracleClientCallerSession) GetNextRequestedBlockNumber() (*big.Int, error) {
+	return _OracleClient.Contract.GetNextRequestedBlockNumber(&_OracleClient.CallOpts)
 }
 
 // NextRequestedBlockNumber is a free data retrieval call binding the contract method 0xc512c561.
 //
 // Solidity: function nextRequestedBlockNumber() view returns(uint256)
-func (_Rollupclient *RollupclientCaller) NextRequestedBlockNumber(opts *bind.CallOpts) (*big.Int, error) {
+func (_OracleClient *OracleClientCaller) NextRequestedBlockNumber(opts *bind.CallOpts) (*big.Int, error) {
 	var out []interface{}
-	err := _Rollupclient.contract.Call(opts, &out, "nextRequestedBlockNumber")
+	err := _OracleClient.contract.Call(opts, &out, "nextRequestedBlockNumber")
 
 	if err != nil {
 		return *new(*big.Int), err
@@ -293,23 +293,23 @@ func (_Rollupclient *RollupclientCaller) NextRequestedBlockNumber(opts *bind.Cal
 // NextRequestedBlockNumber is a free data retrieval call binding the contract method 0xc512c561.
 //
 // Solidity: function nextRequestedBlockNumber() view returns(uint256)
-func (_Rollupclient *RollupclientSession) NextRequestedBlockNumber() (*big.Int, error) {
-	return _Rollupclient.Contract.NextRequestedBlockNumber(&_Rollupclient.CallOpts)
+func (_OracleClient *OracleClientSession) NextRequestedBlockNumber() (*big.Int, error) {
+	return _OracleClient.Contract.NextRequestedBlockNumber(&_OracleClient.CallOpts)
 }
 
 // NextRequestedBlockNumber is a free data retrieval call binding the contract method 0xc512c561.
 //
 // Solidity: function nextRequestedBlockNumber() view returns(uint256)
-func (_Rollupclient *RollupclientCallerSession) NextRequestedBlockNumber() (*big.Int, error) {
-	return _Rollupclient.Contract.NextRequestedBlockNumber(&_Rollupclient.CallOpts)
+func (_OracleClient *OracleClientCallerSession) NextRequestedBlockNumber() (*big.Int, error) {
+	return _OracleClient.Contract.NextRequestedBlockNumber(&_OracleClient.CallOpts)
 }
 
 // Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
 //
 // Solidity: function owner() view returns(address)
-func (_Rollupclient *RollupclientCaller) Owner(opts *bind.CallOpts) (common.Address, error) {
+func (_OracleClient *OracleClientCaller) Owner(opts *bind.CallOpts) (common.Address, error) {
 	var out []interface{}
-	err := _Rollupclient.contract.Call(opts, &out, "owner")
+	err := _OracleClient.contract.Call(opts, &out, "owner")
 
 	if err != nil {
 		return *new(common.Address), err
@@ -324,188 +324,188 @@ func (_Rollupclient *RollupclientCaller) Owner(opts *bind.CallOpts) (common.Addr
 // Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
 //
 // Solidity: function owner() view returns(address)
-func (_Rollupclient *RollupclientSession) Owner() (common.Address, error) {
-	return _Rollupclient.Contract.Owner(&_Rollupclient.CallOpts)
+func (_OracleClient *OracleClientSession) Owner() (common.Address, error) {
+	return _OracleClient.Contract.Owner(&_OracleClient.CallOpts)
 }
 
 // Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
 //
 // Solidity: function owner() view returns(address)
-func (_Rollupclient *RollupclientCallerSession) Owner() (common.Address, error) {
-	return _Rollupclient.Contract.Owner(&_Rollupclient.CallOpts)
+func (_OracleClient *OracleClientCallerSession) Owner() (common.Address, error) {
+	return _OracleClient.Contract.Owner(&_OracleClient.CallOpts)
 }
 
 // AddBuilderAddress is a paid mutator transaction binding the contract method 0x0bd0a9e1.
 //
 // Solidity: function addBuilderAddress(string builderName, address builderAddress) returns()
-func (_Rollupclient *RollupclientTransactor) AddBuilderAddress(opts *bind.TransactOpts, builderName string, builderAddress common.Address) (*types.Transaction, error) {
-	return _Rollupclient.contract.Transact(opts, "addBuilderAddress", builderName, builderAddress)
+func (_OracleClient *OracleClientTransactor) AddBuilderAddress(opts *bind.TransactOpts, builderName string, builderAddress common.Address) (*types.Transaction, error) {
+	return _OracleClient.contract.Transact(opts, "addBuilderAddress", builderName, builderAddress)
 }
 
 // AddBuilderAddress is a paid mutator transaction binding the contract method 0x0bd0a9e1.
 //
 // Solidity: function addBuilderAddress(string builderName, address builderAddress) returns()
-func (_Rollupclient *RollupclientSession) AddBuilderAddress(builderName string, builderAddress common.Address) (*types.Transaction, error) {
-	return _Rollupclient.Contract.AddBuilderAddress(&_Rollupclient.TransactOpts, builderName, builderAddress)
+func (_OracleClient *OracleClientSession) AddBuilderAddress(builderName string, builderAddress common.Address) (*types.Transaction, error) {
+	return _OracleClient.Contract.AddBuilderAddress(&_OracleClient.TransactOpts, builderName, builderAddress)
 }
 
 // AddBuilderAddress is a paid mutator transaction binding the contract method 0x0bd0a9e1.
 //
 // Solidity: function addBuilderAddress(string builderName, address builderAddress) returns()
-func (_Rollupclient *RollupclientTransactorSession) AddBuilderAddress(builderName string, builderAddress common.Address) (*types.Transaction, error) {
-	return _Rollupclient.Contract.AddBuilderAddress(&_Rollupclient.TransactOpts, builderName, builderAddress)
+func (_OracleClient *OracleClientTransactorSession) AddBuilderAddress(builderName string, builderAddress common.Address) (*types.Transaction, error) {
+	return _OracleClient.Contract.AddBuilderAddress(&_OracleClient.TransactOpts, builderName, builderAddress)
 }
 
 // MoveToNextBlock is a paid mutator transaction binding the contract method 0x32289b72.
 //
 // Solidity: function moveToNextBlock() returns()
-func (_Rollupclient *RollupclientTransactor) MoveToNextBlock(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _Rollupclient.contract.Transact(opts, "moveToNextBlock")
+func (_OracleClient *OracleClientTransactor) MoveToNextBlock(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _OracleClient.contract.Transact(opts, "moveToNextBlock")
 }
 
 // MoveToNextBlock is a paid mutator transaction binding the contract method 0x32289b72.
 //
 // Solidity: function moveToNextBlock() returns()
-func (_Rollupclient *RollupclientSession) MoveToNextBlock() (*types.Transaction, error) {
-	return _Rollupclient.Contract.MoveToNextBlock(&_Rollupclient.TransactOpts)
+func (_OracleClient *OracleClientSession) MoveToNextBlock() (*types.Transaction, error) {
+	return _OracleClient.Contract.MoveToNextBlock(&_OracleClient.TransactOpts)
 }
 
 // MoveToNextBlock is a paid mutator transaction binding the contract method 0x32289b72.
 //
 // Solidity: function moveToNextBlock() returns()
-func (_Rollupclient *RollupclientTransactorSession) MoveToNextBlock() (*types.Transaction, error) {
-	return _Rollupclient.Contract.MoveToNextBlock(&_Rollupclient.TransactOpts)
+func (_OracleClient *OracleClientTransactorSession) MoveToNextBlock() (*types.Transaction, error) {
+	return _OracleClient.Contract.MoveToNextBlock(&_OracleClient.TransactOpts)
 }
 
 // ProcessBuilderCommitmentForBlockNumber is a paid mutator transaction binding the contract method 0x04a24484.
 //
 // Solidity: function processBuilderCommitmentForBlockNumber(bytes32 commitmentIndex, uint256 blockNumber, string blockBuilderName, bool isSlash) returns()
-func (_Rollupclient *RollupclientTransactor) ProcessBuilderCommitmentForBlockNumber(opts *bind.TransactOpts, commitmentIndex [32]byte, blockNumber *big.Int, blockBuilderName string, isSlash bool) (*types.Transaction, error) {
-	return _Rollupclient.contract.Transact(opts, "processBuilderCommitmentForBlockNumber", commitmentIndex, blockNumber, blockBuilderName, isSlash)
+func (_OracleClient *OracleClientTransactor) ProcessBuilderCommitmentForBlockNumber(opts *bind.TransactOpts, commitmentIndex [32]byte, blockNumber *big.Int, blockBuilderName string, isSlash bool) (*types.Transaction, error) {
+	return _OracleClient.contract.Transact(opts, "processBuilderCommitmentForBlockNumber", commitmentIndex, blockNumber, blockBuilderName, isSlash)
 }
 
 // ProcessBuilderCommitmentForBlockNumber is a paid mutator transaction binding the contract method 0x04a24484.
 //
 // Solidity: function processBuilderCommitmentForBlockNumber(bytes32 commitmentIndex, uint256 blockNumber, string blockBuilderName, bool isSlash) returns()
-func (_Rollupclient *RollupclientSession) ProcessBuilderCommitmentForBlockNumber(commitmentIndex [32]byte, blockNumber *big.Int, blockBuilderName string, isSlash bool) (*types.Transaction, error) {
-	return _Rollupclient.Contract.ProcessBuilderCommitmentForBlockNumber(&_Rollupclient.TransactOpts, commitmentIndex, blockNumber, blockBuilderName, isSlash)
+func (_OracleClient *OracleClientSession) ProcessBuilderCommitmentForBlockNumber(commitmentIndex [32]byte, blockNumber *big.Int, blockBuilderName string, isSlash bool) (*types.Transaction, error) {
+	return _OracleClient.Contract.ProcessBuilderCommitmentForBlockNumber(&_OracleClient.TransactOpts, commitmentIndex, blockNumber, blockBuilderName, isSlash)
 }
 
 // ProcessBuilderCommitmentForBlockNumber is a paid mutator transaction binding the contract method 0x04a24484.
 //
 // Solidity: function processBuilderCommitmentForBlockNumber(bytes32 commitmentIndex, uint256 blockNumber, string blockBuilderName, bool isSlash) returns()
-func (_Rollupclient *RollupclientTransactorSession) ProcessBuilderCommitmentForBlockNumber(commitmentIndex [32]byte, blockNumber *big.Int, blockBuilderName string, isSlash bool) (*types.Transaction, error) {
-	return _Rollupclient.Contract.ProcessBuilderCommitmentForBlockNumber(&_Rollupclient.TransactOpts, commitmentIndex, blockNumber, blockBuilderName, isSlash)
+func (_OracleClient *OracleClientTransactorSession) ProcessBuilderCommitmentForBlockNumber(commitmentIndex [32]byte, blockNumber *big.Int, blockBuilderName string, isSlash bool) (*types.Transaction, error) {
+	return _OracleClient.Contract.ProcessBuilderCommitmentForBlockNumber(&_OracleClient.TransactOpts, commitmentIndex, blockNumber, blockBuilderName, isSlash)
 }
 
 // RenounceOwnership is a paid mutator transaction binding the contract method 0x715018a6.
 //
 // Solidity: function renounceOwnership() returns()
-func (_Rollupclient *RollupclientTransactor) RenounceOwnership(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _Rollupclient.contract.Transact(opts, "renounceOwnership")
+func (_OracleClient *OracleClientTransactor) RenounceOwnership(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _OracleClient.contract.Transact(opts, "renounceOwnership")
 }
 
 // RenounceOwnership is a paid mutator transaction binding the contract method 0x715018a6.
 //
 // Solidity: function renounceOwnership() returns()
-func (_Rollupclient *RollupclientSession) RenounceOwnership() (*types.Transaction, error) {
-	return _Rollupclient.Contract.RenounceOwnership(&_Rollupclient.TransactOpts)
+func (_OracleClient *OracleClientSession) RenounceOwnership() (*types.Transaction, error) {
+	return _OracleClient.Contract.RenounceOwnership(&_OracleClient.TransactOpts)
 }
 
 // RenounceOwnership is a paid mutator transaction binding the contract method 0x715018a6.
 //
 // Solidity: function renounceOwnership() returns()
-func (_Rollupclient *RollupclientTransactorSession) RenounceOwnership() (*types.Transaction, error) {
-	return _Rollupclient.Contract.RenounceOwnership(&_Rollupclient.TransactOpts)
+func (_OracleClient *OracleClientTransactorSession) RenounceOwnership() (*types.Transaction, error) {
+	return _OracleClient.Contract.RenounceOwnership(&_OracleClient.TransactOpts)
 }
 
 // SetNextBlock is a paid mutator transaction binding the contract method 0x19072add.
 //
 // Solidity: function setNextBlock(uint64 newBlockNumber) returns()
-func (_Rollupclient *RollupclientTransactor) SetNextBlock(opts *bind.TransactOpts, newBlockNumber uint64) (*types.Transaction, error) {
-	return _Rollupclient.contract.Transact(opts, "setNextBlock", newBlockNumber)
+func (_OracleClient *OracleClientTransactor) SetNextBlock(opts *bind.TransactOpts, newBlockNumber uint64) (*types.Transaction, error) {
+	return _OracleClient.contract.Transact(opts, "setNextBlock", newBlockNumber)
 }
 
 // SetNextBlock is a paid mutator transaction binding the contract method 0x19072add.
 //
 // Solidity: function setNextBlock(uint64 newBlockNumber) returns()
-func (_Rollupclient *RollupclientSession) SetNextBlock(newBlockNumber uint64) (*types.Transaction, error) {
-	return _Rollupclient.Contract.SetNextBlock(&_Rollupclient.TransactOpts, newBlockNumber)
+func (_OracleClient *OracleClientSession) SetNextBlock(newBlockNumber uint64) (*types.Transaction, error) {
+	return _OracleClient.Contract.SetNextBlock(&_OracleClient.TransactOpts, newBlockNumber)
 }
 
 // SetNextBlock is a paid mutator transaction binding the contract method 0x19072add.
 //
 // Solidity: function setNextBlock(uint64 newBlockNumber) returns()
-func (_Rollupclient *RollupclientTransactorSession) SetNextBlock(newBlockNumber uint64) (*types.Transaction, error) {
-	return _Rollupclient.Contract.SetNextBlock(&_Rollupclient.TransactOpts, newBlockNumber)
+func (_OracleClient *OracleClientTransactorSession) SetNextBlock(newBlockNumber uint64) (*types.Transaction, error) {
+	return _OracleClient.Contract.SetNextBlock(&_OracleClient.TransactOpts, newBlockNumber)
 }
 
 // TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
 //
 // Solidity: function transferOwnership(address newOwner) returns()
-func (_Rollupclient *RollupclientTransactor) TransferOwnership(opts *bind.TransactOpts, newOwner common.Address) (*types.Transaction, error) {
-	return _Rollupclient.contract.Transact(opts, "transferOwnership", newOwner)
+func (_OracleClient *OracleClientTransactor) TransferOwnership(opts *bind.TransactOpts, newOwner common.Address) (*types.Transaction, error) {
+	return _OracleClient.contract.Transact(opts, "transferOwnership", newOwner)
 }
 
 // TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
 //
 // Solidity: function transferOwnership(address newOwner) returns()
-func (_Rollupclient *RollupclientSession) TransferOwnership(newOwner common.Address) (*types.Transaction, error) {
-	return _Rollupclient.Contract.TransferOwnership(&_Rollupclient.TransactOpts, newOwner)
+func (_OracleClient *OracleClientSession) TransferOwnership(newOwner common.Address) (*types.Transaction, error) {
+	return _OracleClient.Contract.TransferOwnership(&_OracleClient.TransactOpts, newOwner)
 }
 
 // TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
 //
 // Solidity: function transferOwnership(address newOwner) returns()
-func (_Rollupclient *RollupclientTransactorSession) TransferOwnership(newOwner common.Address) (*types.Transaction, error) {
-	return _Rollupclient.Contract.TransferOwnership(&_Rollupclient.TransactOpts, newOwner)
+func (_OracleClient *OracleClientTransactorSession) TransferOwnership(newOwner common.Address) (*types.Transaction, error) {
+	return _OracleClient.Contract.TransferOwnership(&_OracleClient.TransactOpts, newOwner)
 }
 
 // Fallback is a paid mutator transaction binding the contract fallback function.
 //
 // Solidity: fallback() payable returns()
-func (_Rollupclient *RollupclientTransactor) Fallback(opts *bind.TransactOpts, calldata []byte) (*types.Transaction, error) {
-	return _Rollupclient.contract.RawTransact(opts, calldata)
+func (_OracleClient *OracleClientTransactor) Fallback(opts *bind.TransactOpts, calldata []byte) (*types.Transaction, error) {
+	return _OracleClient.contract.RawTransact(opts, calldata)
 }
 
 // Fallback is a paid mutator transaction binding the contract fallback function.
 //
 // Solidity: fallback() payable returns()
-func (_Rollupclient *RollupclientSession) Fallback(calldata []byte) (*types.Transaction, error) {
-	return _Rollupclient.Contract.Fallback(&_Rollupclient.TransactOpts, calldata)
+func (_OracleClient *OracleClientSession) Fallback(calldata []byte) (*types.Transaction, error) {
+	return _OracleClient.Contract.Fallback(&_OracleClient.TransactOpts, calldata)
 }
 
 // Fallback is a paid mutator transaction binding the contract fallback function.
 //
 // Solidity: fallback() payable returns()
-func (_Rollupclient *RollupclientTransactorSession) Fallback(calldata []byte) (*types.Transaction, error) {
-	return _Rollupclient.Contract.Fallback(&_Rollupclient.TransactOpts, calldata)
+func (_OracleClient *OracleClientTransactorSession) Fallback(calldata []byte) (*types.Transaction, error) {
+	return _OracleClient.Contract.Fallback(&_OracleClient.TransactOpts, calldata)
 }
 
 // Receive is a paid mutator transaction binding the contract receive function.
 //
 // Solidity: receive() payable returns()
-func (_Rollupclient *RollupclientTransactor) Receive(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _Rollupclient.contract.RawTransact(opts, nil) // calldata is disallowed for receive function
+func (_OracleClient *OracleClientTransactor) Receive(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _OracleClient.contract.RawTransact(opts, nil) // calldata is disallowed for receive function
 }
 
 // Receive is a paid mutator transaction binding the contract receive function.
 //
 // Solidity: receive() payable returns()
-func (_Rollupclient *RollupclientSession) Receive() (*types.Transaction, error) {
-	return _Rollupclient.Contract.Receive(&_Rollupclient.TransactOpts)
+func (_OracleClient *OracleClientSession) Receive() (*types.Transaction, error) {
+	return _OracleClient.Contract.Receive(&_OracleClient.TransactOpts)
 }
 
 // Receive is a paid mutator transaction binding the contract receive function.
 //
 // Solidity: receive() payable returns()
-func (_Rollupclient *RollupclientTransactorSession) Receive() (*types.Transaction, error) {
-	return _Rollupclient.Contract.Receive(&_Rollupclient.TransactOpts)
+func (_OracleClient *OracleClientTransactorSession) Receive() (*types.Transaction, error) {
+	return _OracleClient.Contract.Receive(&_OracleClient.TransactOpts)
 }
 
-// RollupclientCommitmentProcessedIterator is returned from FilterCommitmentProcessed and is used to iterate over the raw logs and unpacked data for CommitmentProcessed events raised by the Rollupclient contract.
-type RollupclientCommitmentProcessedIterator struct {
-	Event *RollupclientCommitmentProcessed // Event containing the contract specifics and raw log
+// OracleClientCommitmentProcessedIterator is returned from FilterCommitmentProcessed and is used to iterate over the raw logs and unpacked data for CommitmentProcessed events raised by the OracleClient contract.
+type OracleClientCommitmentProcessedIterator struct {
+	Event *OracleClientCommitmentProcessed // Event containing the contract specifics and raw log
 
 	contract *bind.BoundContract // Generic contract to use for unpacking event data
 	event    string              // Event name to use for unpacking event data
@@ -519,7 +519,7 @@ type RollupclientCommitmentProcessedIterator struct {
 // Next advances the iterator to the subsequent event, returning whether there
 // are any more events found. In case of a retrieval or parsing error, false is
 // returned and Error() can be queried for the exact failure.
-func (it *RollupclientCommitmentProcessedIterator) Next() bool {
+func (it *OracleClientCommitmentProcessedIterator) Next() bool {
 	// If the iterator failed, stop iterating
 	if it.fail != nil {
 		return false
@@ -528,7 +528,7 @@ func (it *RollupclientCommitmentProcessedIterator) Next() bool {
 	if it.done {
 		select {
 		case log := <-it.logs:
-			it.Event = new(RollupclientCommitmentProcessed)
+			it.Event = new(OracleClientCommitmentProcessed)
 			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 				it.fail = err
 				return false
@@ -543,7 +543,7 @@ func (it *RollupclientCommitmentProcessedIterator) Next() bool {
 	// Iterator still in progress, wait for either a data or an error event
 	select {
 	case log := <-it.logs:
-		it.Event = new(RollupclientCommitmentProcessed)
+		it.Event = new(OracleClientCommitmentProcessed)
 		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 			it.fail = err
 			return false
@@ -559,19 +559,19 @@ func (it *RollupclientCommitmentProcessedIterator) Next() bool {
 }
 
 // Error returns any retrieval or parsing error occurred during filtering.
-func (it *RollupclientCommitmentProcessedIterator) Error() error {
+func (it *OracleClientCommitmentProcessedIterator) Error() error {
 	return it.fail
 }
 
 // Close terminates the iteration process, releasing any pending underlying
 // resources.
-func (it *RollupclientCommitmentProcessedIterator) Close() error {
+func (it *OracleClientCommitmentProcessedIterator) Close() error {
 	it.sub.Unsubscribe()
 	return nil
 }
 
-// RollupclientCommitmentProcessed represents a CommitmentProcessed event raised by the Rollupclient contract.
-type RollupclientCommitmentProcessed struct {
+// OracleClientCommitmentProcessed represents a CommitmentProcessed event raised by the OracleClient contract.
+type OracleClientCommitmentProcessed struct {
 	CommitmentHash [32]byte
 	IsSlash        bool
 	Raw            types.Log // Blockchain specific contextual infos
@@ -580,21 +580,21 @@ type RollupclientCommitmentProcessed struct {
 // FilterCommitmentProcessed is a free log retrieval operation binding the contract event 0xddc1768a3a762a04e5fd3abea8ae3b60e23bcf290f4a032280e6a726611d41f5.
 //
 // Solidity: event CommitmentProcessed(bytes32 commitmentHash, bool isSlash)
-func (_Rollupclient *RollupclientFilterer) FilterCommitmentProcessed(opts *bind.FilterOpts) (*RollupclientCommitmentProcessedIterator, error) {
+func (_OracleClient *OracleClientFilterer) FilterCommitmentProcessed(opts *bind.FilterOpts) (*OracleClientCommitmentProcessedIterator, error) {
 
-	logs, sub, err := _Rollupclient.contract.FilterLogs(opts, "CommitmentProcessed")
+	logs, sub, err := _OracleClient.contract.FilterLogs(opts, "CommitmentProcessed")
 	if err != nil {
 		return nil, err
 	}
-	return &RollupclientCommitmentProcessedIterator{contract: _Rollupclient.contract, event: "CommitmentProcessed", logs: logs, sub: sub}, nil
+	return &OracleClientCommitmentProcessedIterator{contract: _OracleClient.contract, event: "CommitmentProcessed", logs: logs, sub: sub}, nil
 }
 
 // WatchCommitmentProcessed is a free log subscription operation binding the contract event 0xddc1768a3a762a04e5fd3abea8ae3b60e23bcf290f4a032280e6a726611d41f5.
 //
 // Solidity: event CommitmentProcessed(bytes32 commitmentHash, bool isSlash)
-func (_Rollupclient *RollupclientFilterer) WatchCommitmentProcessed(opts *bind.WatchOpts, sink chan<- *RollupclientCommitmentProcessed) (event.Subscription, error) {
+func (_OracleClient *OracleClientFilterer) WatchCommitmentProcessed(opts *bind.WatchOpts, sink chan<- *OracleClientCommitmentProcessed) (event.Subscription, error) {
 
-	logs, sub, err := _Rollupclient.contract.WatchLogs(opts, "CommitmentProcessed")
+	logs, sub, err := _OracleClient.contract.WatchLogs(opts, "CommitmentProcessed")
 	if err != nil {
 		return nil, err
 	}
@@ -604,8 +604,8 @@ func (_Rollupclient *RollupclientFilterer) WatchCommitmentProcessed(opts *bind.W
 			select {
 			case log := <-logs:
 				// New log arrived, parse the event and forward to the user
-				event := new(RollupclientCommitmentProcessed)
-				if err := _Rollupclient.contract.UnpackLog(event, "CommitmentProcessed", log); err != nil {
+				event := new(OracleClientCommitmentProcessed)
+				if err := _OracleClient.contract.UnpackLog(event, "CommitmentProcessed", log); err != nil {
 					return err
 				}
 				event.Raw = log
@@ -629,18 +629,18 @@ func (_Rollupclient *RollupclientFilterer) WatchCommitmentProcessed(opts *bind.W
 // ParseCommitmentProcessed is a log parse operation binding the contract event 0xddc1768a3a762a04e5fd3abea8ae3b60e23bcf290f4a032280e6a726611d41f5.
 //
 // Solidity: event CommitmentProcessed(bytes32 commitmentHash, bool isSlash)
-func (_Rollupclient *RollupclientFilterer) ParseCommitmentProcessed(log types.Log) (*RollupclientCommitmentProcessed, error) {
-	event := new(RollupclientCommitmentProcessed)
-	if err := _Rollupclient.contract.UnpackLog(event, "CommitmentProcessed", log); err != nil {
+func (_OracleClient *OracleClientFilterer) ParseCommitmentProcessed(log types.Log) (*OracleClientCommitmentProcessed, error) {
+	event := new(OracleClientCommitmentProcessed)
+	if err := _OracleClient.contract.UnpackLog(event, "CommitmentProcessed", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log
 	return event, nil
 }
 
-// RollupclientOwnershipTransferredIterator is returned from FilterOwnershipTransferred and is used to iterate over the raw logs and unpacked data for OwnershipTransferred events raised by the Rollupclient contract.
-type RollupclientOwnershipTransferredIterator struct {
-	Event *RollupclientOwnershipTransferred // Event containing the contract specifics and raw log
+// OracleClientOwnershipTransferredIterator is returned from FilterOwnershipTransferred and is used to iterate over the raw logs and unpacked data for OwnershipTransferred events raised by the OracleClient contract.
+type OracleClientOwnershipTransferredIterator struct {
+	Event *OracleClientOwnershipTransferred // Event containing the contract specifics and raw log
 
 	contract *bind.BoundContract // Generic contract to use for unpacking event data
 	event    string              // Event name to use for unpacking event data
@@ -654,7 +654,7 @@ type RollupclientOwnershipTransferredIterator struct {
 // Next advances the iterator to the subsequent event, returning whether there
 // are any more events found. In case of a retrieval or parsing error, false is
 // returned and Error() can be queried for the exact failure.
-func (it *RollupclientOwnershipTransferredIterator) Next() bool {
+func (it *OracleClientOwnershipTransferredIterator) Next() bool {
 	// If the iterator failed, stop iterating
 	if it.fail != nil {
 		return false
@@ -663,7 +663,7 @@ func (it *RollupclientOwnershipTransferredIterator) Next() bool {
 	if it.done {
 		select {
 		case log := <-it.logs:
-			it.Event = new(RollupclientOwnershipTransferred)
+			it.Event = new(OracleClientOwnershipTransferred)
 			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 				it.fail = err
 				return false
@@ -678,7 +678,7 @@ func (it *RollupclientOwnershipTransferredIterator) Next() bool {
 	// Iterator still in progress, wait for either a data or an error event
 	select {
 	case log := <-it.logs:
-		it.Event = new(RollupclientOwnershipTransferred)
+		it.Event = new(OracleClientOwnershipTransferred)
 		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 			it.fail = err
 			return false
@@ -694,19 +694,19 @@ func (it *RollupclientOwnershipTransferredIterator) Next() bool {
 }
 
 // Error returns any retrieval or parsing error occurred during filtering.
-func (it *RollupclientOwnershipTransferredIterator) Error() error {
+func (it *OracleClientOwnershipTransferredIterator) Error() error {
 	return it.fail
 }
 
 // Close terminates the iteration process, releasing any pending underlying
 // resources.
-func (it *RollupclientOwnershipTransferredIterator) Close() error {
+func (it *OracleClientOwnershipTransferredIterator) Close() error {
 	it.sub.Unsubscribe()
 	return nil
 }
 
-// RollupclientOwnershipTransferred represents a OwnershipTransferred event raised by the Rollupclient contract.
-type RollupclientOwnershipTransferred struct {
+// OracleClientOwnershipTransferred represents a OwnershipTransferred event raised by the OracleClient contract.
+type OracleClientOwnershipTransferred struct {
 	PreviousOwner common.Address
 	NewOwner      common.Address
 	Raw           types.Log // Blockchain specific contextual infos
@@ -715,7 +715,7 @@ type RollupclientOwnershipTransferred struct {
 // FilterOwnershipTransferred is a free log retrieval operation binding the contract event 0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0.
 //
 // Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
-func (_Rollupclient *RollupclientFilterer) FilterOwnershipTransferred(opts *bind.FilterOpts, previousOwner []common.Address, newOwner []common.Address) (*RollupclientOwnershipTransferredIterator, error) {
+func (_OracleClient *OracleClientFilterer) FilterOwnershipTransferred(opts *bind.FilterOpts, previousOwner []common.Address, newOwner []common.Address) (*OracleClientOwnershipTransferredIterator, error) {
 
 	var previousOwnerRule []interface{}
 	for _, previousOwnerItem := range previousOwner {
@@ -726,17 +726,17 @@ func (_Rollupclient *RollupclientFilterer) FilterOwnershipTransferred(opts *bind
 		newOwnerRule = append(newOwnerRule, newOwnerItem)
 	}
 
-	logs, sub, err := _Rollupclient.contract.FilterLogs(opts, "OwnershipTransferred", previousOwnerRule, newOwnerRule)
+	logs, sub, err := _OracleClient.contract.FilterLogs(opts, "OwnershipTransferred", previousOwnerRule, newOwnerRule)
 	if err != nil {
 		return nil, err
 	}
-	return &RollupclientOwnershipTransferredIterator{contract: _Rollupclient.contract, event: "OwnershipTransferred", logs: logs, sub: sub}, nil
+	return &OracleClientOwnershipTransferredIterator{contract: _OracleClient.contract, event: "OwnershipTransferred", logs: logs, sub: sub}, nil
 }
 
 // WatchOwnershipTransferred is a free log subscription operation binding the contract event 0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0.
 //
 // Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
-func (_Rollupclient *RollupclientFilterer) WatchOwnershipTransferred(opts *bind.WatchOpts, sink chan<- *RollupclientOwnershipTransferred, previousOwner []common.Address, newOwner []common.Address) (event.Subscription, error) {
+func (_OracleClient *OracleClientFilterer) WatchOwnershipTransferred(opts *bind.WatchOpts, sink chan<- *OracleClientOwnershipTransferred, previousOwner []common.Address, newOwner []common.Address) (event.Subscription, error) {
 
 	var previousOwnerRule []interface{}
 	for _, previousOwnerItem := range previousOwner {
@@ -747,7 +747,7 @@ func (_Rollupclient *RollupclientFilterer) WatchOwnershipTransferred(opts *bind.
 		newOwnerRule = append(newOwnerRule, newOwnerItem)
 	}
 
-	logs, sub, err := _Rollupclient.contract.WatchLogs(opts, "OwnershipTransferred", previousOwnerRule, newOwnerRule)
+	logs, sub, err := _OracleClient.contract.WatchLogs(opts, "OwnershipTransferred", previousOwnerRule, newOwnerRule)
 	if err != nil {
 		return nil, err
 	}
@@ -757,8 +757,8 @@ func (_Rollupclient *RollupclientFilterer) WatchOwnershipTransferred(opts *bind.
 			select {
 			case log := <-logs:
 				// New log arrived, parse the event and forward to the user
-				event := new(RollupclientOwnershipTransferred)
-				if err := _Rollupclient.contract.UnpackLog(event, "OwnershipTransferred", log); err != nil {
+				event := new(OracleClientOwnershipTransferred)
+				if err := _OracleClient.contract.UnpackLog(event, "OwnershipTransferred", log); err != nil {
 					return err
 				}
 				event.Raw = log
@@ -782,9 +782,9 @@ func (_Rollupclient *RollupclientFilterer) WatchOwnershipTransferred(opts *bind.
 // ParseOwnershipTransferred is a log parse operation binding the contract event 0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0.
 //
 // Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
-func (_Rollupclient *RollupclientFilterer) ParseOwnershipTransferred(log types.Log) (*RollupclientOwnershipTransferred, error) {
-	event := new(RollupclientOwnershipTransferred)
-	if err := _Rollupclient.contract.UnpackLog(event, "OwnershipTransferred", log); err != nil {
+func (_OracleClient *OracleClientFilterer) ParseOwnershipTransferred(log types.Log) (*OracleClientOwnershipTransferred, error) {
+	event := new(OracleClientOwnershipTransferred)
+	if err := _OracleClient.contract.UnpackLog(event, "OwnershipTransferred", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log

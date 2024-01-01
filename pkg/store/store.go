@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/ethereum/go-ethereum/common"
+	_ "github.com/lib/pq"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
 )

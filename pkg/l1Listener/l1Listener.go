@@ -9,6 +9,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var checkInterval = 2 * time.Second
+
 type WinnerRegister interface {
 	RegisterWinner(ctx context.Context, blockNum int64, winner string) error
 }
@@ -39,7 +41,7 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 	go func() {
 		defer close(doneChan)
 
-		ticker := time.NewTicker(2 * time.Second)
+		ticker := time.NewTicker(checkInterval)
 		defer ticker.Stop()
 
 		currentBlockNo := 0
@@ -58,26 +60,35 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 					continue
 				}
 
-				currentBlockNo = int(blockNum)
-				header, err := l.l1Client.HeaderByNumber(ctx, big.NewInt(int64(currentBlockNo)))
+				header, err := l.l1Client.HeaderByNumber(ctx, big.NewInt(int64(blockNum)))
 				if err != nil {
-					log.Error().Err(err).Msg("failed to get header")
+					log.Error().Err(err).
+						Uint64("block", blockNum).
+						Msg("failed to get header")
 					continue
 				}
 
 				winner := string(header.Extra)
-				err = l.winnerRegister.RegisterWinner(ctx, int64(currentBlockNo), winner)
-				if err != nil {
-					log.Error().Err(err).
-						Int64("block", int64(currentBlockNo)).
-						Msg("failed to register winner for block")
-					return
-				}
+				if len(winner) == 0 {
+					log.Warn().
+						Int64("block", header.Number.Int64()).
+						Msg("no winner registered")
+					continue
+				} else {
+					err = l.winnerRegister.RegisterWinner(ctx, int64(blockNum), winner)
+					if err != nil {
+						log.Error().Err(err).
+							Uint64("block", blockNum).
+							Msg("failed to register winner for block")
+						return
+					}
 
-				log.Info().
-					Str("winner", winner).
-					Int64("block", header.Number.Int64()).
-					Msg("registered winner")
+					log.Info().
+						Str("winner", winner).
+						Int64("block", header.Number.Int64()).
+						Msg("registered winner")
+				}
+				currentBlockNo = int(blockNum)
 			}
 		}
 

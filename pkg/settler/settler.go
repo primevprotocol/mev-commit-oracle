@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 )
 
@@ -56,6 +57,7 @@ type Settler struct {
 	rollupClient    Oracle
 	settlerRegister SettlerRegister
 	client          Transactor
+	metrics         *metrics
 }
 
 func NewSettler(
@@ -73,6 +75,7 @@ func NewSettler(
 		client:          client,
 		privateKey:      privateKey,
 		chainID:         chainID,
+		metrics:         newMetrics(),
 	}
 }
 
@@ -110,6 +113,10 @@ func (s *Settler) getTransactOpts(ctx context.Context) (*bind.TransactOpts, erro
 	auth.GasTipCap = gasTip
 
 	return auth, nil
+}
+
+func (s *Settler) Metrics() []prometheus.Collector {
+	return s.metrics.Collectors()
 }
 
 func (s *Settler) Start(ctx context.Context) <-chan struct{} {
@@ -152,6 +159,10 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 				log.Error().Err(err).Msg("failed to mark settlement complete")
 				continue
 			}
+
+			s.metrics.LastConfirmedNonce.Set(float64(lastNonce))
+			s.metrics.LastConfirmedBlock.Set(float64(currentBlock))
+			s.metrics.SettlementsConfirmedCount.Add(float64(count))
 
 			if count > 0 {
 				log.Info().Int("count", count).Msg("marked settlement complete")
@@ -218,6 +229,9 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 					if err != nil {
 						return err
 					}
+
+					s.metrics.SettlementsPostedCount.Inc()
+					s.metrics.CurrentSettlementL1Block.Set(float64(settlement.BlockNum))
 
 					log.Info().
 						Int64("blockNum", settlement.BlockNum).

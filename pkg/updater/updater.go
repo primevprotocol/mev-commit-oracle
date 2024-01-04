@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/primevprotocol/mev-oracle/pkg/preconf"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 )
 
@@ -48,6 +49,7 @@ type Updater struct {
 	preconfClient        Preconf
 	rollupClient         Oracle
 	builderIdentityCache map[string]common.Address
+	metrics              *metrics
 }
 
 func NewUpdater(
@@ -62,7 +64,12 @@ func NewUpdater(
 		preconfClient:        preconfClient,
 		rollupClient:         rollupClient,
 		builderIdentityCache: make(map[string]common.Address),
+		metrics:              newMetrics(),
 	}
+}
+
+func (u *Updater) Metrics() []prometheus.Collector {
+	return u.metrics.Collectors()
 }
 
 func (u *Updater) Start(ctx context.Context) <-chan struct{} {
@@ -84,6 +91,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 					unsub()
 					goto RESTART
 				}
+				u.metrics.UpdaterTriggerCount.Inc()
 
 				err := func() error {
 					var err error
@@ -119,7 +127,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 						Int64("blockNumber", winner.BlockNumber).
 						Msg("commitment indexes")
 
-					count := 0
+					count, slashes := 0, 0
 					for _, index := range commitmentIndexes {
 						commitment, err := u.preconfClient.GetCommitment(index)
 						if err != nil {
@@ -140,6 +148,9 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 								return fmt.Errorf("failed to add settlement: %w", err)
 							}
 							count++
+							if !ok {
+								slashes++
+							}
 						}
 					}
 
@@ -147,6 +158,10 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 					if err != nil {
 						return fmt.Errorf("failed to update completion of block updates: %w", err)
 					}
+
+					u.metrics.CommimentsCount.Add(float64(len(commitmentIndexes)))
+					u.metrics.BlockCommitmentsCount.Inc()
+					u.metrics.SlashesCount.Add(float64(slashes))
 
 					log.Info().
 						Int("count", count).

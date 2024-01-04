@@ -219,7 +219,7 @@ func (s *Store) SettlementInitiated(
 func (s *Store) MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error) {
 	result, err := s.db.ExecContext(
 		ctx,
-		"UPDATE settlements SET settled = true WHERE nonce < $1 AND chainhash IS NOT NULL",
+		"UPDATE settlements SET settled = true WHERE settled = false AND nonce < $1 AND chainhash IS NOT NULL",
 		nonce,
 	)
 	if err != nil {

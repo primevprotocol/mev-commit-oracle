@@ -9,6 +9,7 @@ const (
 
 type metrics struct {
 	LastConfirmedNonce        prometheus.Gauge
+	LastUsedNonce             prometheus.Gauge
 	LastConfirmedBlock        prometheus.Gauge
 	CurrentSettlementL1Block  prometheus.Gauge
 	SettlementsPostedCount    prometheus.Counter
@@ -23,6 +24,14 @@ func newMetrics() *metrics {
 			Subsystem: subsystem,
 			Name:      "last_confirmed_nonce",
 			Help:      "Last confirmed nonce (L2 block number)",
+		},
+	)
+	m.LastUsedNonce = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: defaultNamespace,
+			Subsystem: subsystem,
+			Name:      "last_used_nonce",
+			Help:      "Last used nonce (L2 block number)",
 		},
 	)
 	m.LastConfirmedBlock = prometheus.NewGauge(
@@ -63,6 +72,7 @@ func newMetrics() *metrics {
 func (m *metrics) Collectors() []prometheus.Collector {
 	return []prometheus.Collector{
 		m.LastConfirmedNonce,
+		m.LastUsedNonce,
 		m.LastConfirmedBlock,
 		m.CurrentSettlementL1Block,
 		m.SettlementsPostedCount,

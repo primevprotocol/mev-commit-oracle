@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 )
 
@@ -23,6 +24,7 @@ type EthClient interface {
 type L1Listener struct {
 	l1Client       EthClient
 	winnerRegister WinnerRegister
+	metrics        *metrics
 }
 
 func NewL1Listener(
@@ -32,7 +34,12 @@ func NewL1Listener(
 	return &L1Listener{
 		l1Client:       l1Client,
 		winnerRegister: winnerRegister,
+		metrics:        newMetrics(),
 	}
+}
+
+func (l *L1Listener) Metrics() []prometheus.Collector {
+	return l.metrics.Collectors()
 }
 
 func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
@@ -82,6 +89,9 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 							Msg("failed to register winner for block")
 						return
 					}
+
+					l.metrics.WinnerRoundCount.WithLabelValues(winner).Inc()
+					l.metrics.WinnerCount.Inc()
 
 					log.Info().
 						Str("winner", winner).

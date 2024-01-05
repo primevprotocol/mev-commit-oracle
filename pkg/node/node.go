@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/primevprotocol/mev-oracle/pkg/apiserver"
 	"github.com/primevprotocol/mev-oracle/pkg/l1Listener"
 	"github.com/primevprotocol/mev-oracle/pkg/preconf"
 	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
@@ -147,8 +148,17 @@ func NewNode(opts *Options) (*Node, error) {
 	)
 	settlrClosed := settlr.Start(ctx)
 
+	srv := apiserver.New()
+	srv.RegisterMetricsCollectors(l1Lis.Metrics()...)
+	srv.RegisterMetricsCollectors(updtr.Metrics()...)
+	srv.RegisterMetricsCollectors(settlr.Metrics()...)
+
+	srvClosed := srv.Start(fmt.Sprintf(":%d", opts.HTTPPort))
+
 	nd.waitClose = func() {
 		cancel()
+
+		_ = srv.Stop()
 
 		closeChan := make(chan struct{})
 		go func() {
@@ -157,6 +167,7 @@ func NewNode(opts *Options) (*Node, error) {
 			<-l1LisClosed
 			<-updtrClosed
 			<-settlrClosed
+			<-srvClosed
 		}()
 
 		<-closeChan

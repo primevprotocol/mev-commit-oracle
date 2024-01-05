@@ -2,9 +2,11 @@ package updater
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/primevprotocol/mev-oracle/pkg/preconf"
@@ -99,6 +101,12 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 					if !ok {
 						builderAddr, err = u.rollupClient.GetBuilder(winner.Winner)
 						if err != nil {
+							if errors.Is(err, ethereum.NotFound) {
+								log.Warn().
+									Str("builder", winner.Winner).
+									Msg("builder not registered")
+								return u.winnerRegister.UpdateComplete(ctx, winner.BlockNumber)
+							}
 							return fmt.Errorf("failed to get builder address: %w", err)
 						}
 						u.builderIdentityCache[winner.Winner] = builderAddr

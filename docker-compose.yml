@@ -26,6 +26,8 @@ services:
         ]
     depends_on:
       - oracle-db
+    networks:
+      - primev_net
 
   oracle-db:
     image: postgres:latest
@@ -53,6 +55,13 @@ services:
       - DD_LOGS_ENABLED=true
       - DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true
       - DD_CONTAINER_EXCLUDE="name:datadog-agent"
+    networks:
+      - primev_net
+
+networks:
+  primev_net:
+    external: true
+
 
 volumes:
   postgres_data:

@@ -8,6 +8,8 @@ services:
     restart: always
     environment:
       - L1_URL=${L1_URL}
+      - ORACLE_USER=${ORACLE_USER}
+      - ORACLE_PASS=${ORACLE_PASS}
     labels:
       com.datadoghq.ad.check_names: '["openmetrics"]'
       com.datadoghq.ad.init_configs: '[{}]'
@@ -30,8 +32,8 @@ services:
     restart: always
     environment:
       POSTGRES_DB: oracle_db
-      POSTGRES_USER: oracle_user
-      POSTGRES_PASSWORD: oracle_pass
+      POSTGRES_USER: ${ORACLE_USER}
+      POSTGRES_PASSWORD: ${ORACLE_PASS}
     ports:
       - "5432:5432"
     volumes:

@@ -1,13 +1,18 @@
 # Oracle
 Connects to the Oracle contract to trigger rewards and slashing of commitments.
 
-
-## Enviornment Variables to run for Docker-compose
-- Ensure the Deploy_env variable is set specific to the environment you're running in. For example, in local run, do the following
-```bash
-$ DEPLOY_ENV="env:local"; DD_KEY="<Datadog-key>"; docker compose up --build
+# Running
+Set the correct values in the .env file
+```
+L1_URL=YOUR_INFURA_URL
+INTEGREATION_TEST=YOUR_BOOLEAN_VALUE
+DB_HOST=YOUR_DB_HOST
+ORACLE_PASS=YOUR_DB_PASSWORD
+DD_KEY=YOUR_DD_KEY
 ```
 
+Run:
+`docker compose up --build`
 
 ## Usage
 

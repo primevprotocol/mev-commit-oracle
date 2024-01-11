@@ -154,7 +154,7 @@ func NewNode(opts *Options) (*Node, error) {
 	)
 	settlrClosed := settlr.Start(ctx)
 
-	srv := apiserver.New()
+	srv := apiserver.New(st)
 	srv.RegisterMetricsCollectors(l1Lis.Metrics()...)
 	srv.RegisterMetricsCollectors(updtr.Metrics()...)
 	srv.RegisterMetricsCollectors(settlr.Metrics()...)

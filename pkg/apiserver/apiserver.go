@@ -3,12 +3,15 @@ package apiserver
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"expvar"
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"strconv"
 	"time"
 
+	"github.com/primevprotocol/mev-oracle/pkg/store"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -25,13 +28,15 @@ type Service struct {
 	metricsRegistry *prometheus.Registry
 	router          *http.ServeMux
 	srv             *http.Server
+	storage         *store.Store
 }
 
 // New creates a new Service.
-func New() *Service {
+func New(st *store.Store) *Service {
 	srv := &Service{
 		router:          http.NewServeMux(),
 		metricsRegistry: newMetrics(),
+		storage:         st,
 	}
 
 	srv.registerDebugEndpoints()
@@ -60,6 +65,63 @@ func (a *Service) registerDebugEndpoints() {
 	a.router.Handle("/debug/vars", expvar.Handler())
 }
 
+func (a *Service) registerStatsEndpoints() {
+	a.router.HandleFunc("/processed_blocks", func(w http.ResponseWriter, r *http.Request) {
+		pg := r.URL.Query().Get("page")
+		lim := r.URL.Query().Get("limit")
+
+		page, limit := 0, 10
+		if pg != "" {
+			if pgInt, err := strconv.Atoi(pg); err == nil {
+				page = pgInt
+			}
+		}
+		if lim != "" {
+			if limInt, err := strconv.Atoi(lim); err == nil {
+				limit = limInt
+			}
+		}
+
+		blocks, err := a.storage.ProcessedBlocks(page, limit)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to get processed blocks")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		resp, err := json.Marshal(blocks)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to marshal processed blocks")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(resp)
+	})
+
+	a.router.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+		stats, err := a.storage.CommitmentStats()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to get stats")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		resp, err := json.Marshal(stats)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to marshal stats")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(resp)
+	})
+}
+
 func newMetrics() (r *prometheus.Registry) {
 	r = prometheus.NewRegistry()
 
@@ -72,6 +134,10 @@ func newMetrics() (r *prometheus.Registry) {
 	)
 
 	return r
+}
+
+func (a *Service) Handle(path string, h http.Handler) {
+	a.router.Handle(path, h)
 }
 
 func (a *Service) Start(addr string) <-chan struct{} {

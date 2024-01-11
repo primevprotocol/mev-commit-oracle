@@ -15,10 +15,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	rollupclient "github.com/primevprotocol/contracts-abi/clients/Oracle"
+	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
 	"github.com/primevprotocol/mev-oracle/pkg/apiserver"
 	"github.com/primevprotocol/mev-oracle/pkg/l1Listener"
-	"github.com/primevprotocol/mev-oracle/pkg/preconf"
-	"github.com/primevprotocol/mev-oracle/pkg/rollupclient"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/primevprotocol/mev-oracle/pkg/store"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
@@ -92,13 +92,16 @@ func NewNode(opts *Options) (*Node, error) {
 		listenerL1Client = &laggerdL1Client{EthClient: listenerL1Client, amount: opts.LaggerdMode}
 	}
 
-	preconfContract, err := preconf.NewPreconfCaller(opts.PreconfContractAddr, settlementClient)
+	preconfContract, err := preconf.NewPreconfcommitmentstoreCaller(
+		opts.PreconfContractAddr,
+		settlementClient,
+	)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to instantiate preconf contract")
 		return nil, err
 	}
 
-	oracleContract, err := rollupclient.NewOracleClient(opts.OracleContractAddr, settlementClient)
+	oracleContract, err := rollupclient.NewOracle(opts.OracleContractAddr, settlementClient)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to instantiate oracle contract")
 		return nil, err
@@ -132,8 +135,11 @@ func NewNode(opts *Options) (*Node, error) {
 		Context: ctx,
 	}
 
-	pc := &preconf.PreconfCallerSession{Contract: preconfContract, CallOpts: callOpts}
-	oc := &rollupclient.OracleClientSession{Contract: oracleContract, CallOpts: callOpts}
+	pc := &preconf.PreconfcommitmentstoreCallerSession{
+		Contract: preconfContract,
+		CallOpts: callOpts,
+	}
+	oc := &rollupclient.OracleSession{Contract: oracleContract, CallOpts: callOpts}
 
 	updtr := updater.NewUpdater(l1Client, st, oc, pc)
 	updtrClosed := updtr.Start(ctx)
@@ -270,7 +276,7 @@ func setBuilderMapping(
 	privateKey *ecdsa.PrivateKey,
 	chainID *big.Int,
 	client *ethclient.Client,
-	rc *rollupclient.OracleClient,
+	rc *rollupclient.Oracle,
 	builderName string,
 	builderAddress string,
 ) error {

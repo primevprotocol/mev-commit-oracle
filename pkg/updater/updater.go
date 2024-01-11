@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/primevprotocol/mev-oracle/pkg/preconf"
+	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 )

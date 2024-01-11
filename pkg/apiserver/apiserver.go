@@ -40,6 +40,7 @@ func New(st *store.Store) *Service {
 	}
 
 	srv.registerDebugEndpoints()
+	srv.registerStatsEndpoints()
 	return srv
 }
 
@@ -134,10 +135,6 @@ func newMetrics() (r *prometheus.Registry) {
 	)
 
 	return r
-}
-
-func (a *Service) Handle(path string, h http.Handler) {
-	a.router.Handle(path, h)
 }
 
 func (a *Service) Start(addr string) <-chan struct{} {

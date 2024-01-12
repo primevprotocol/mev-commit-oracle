@@ -98,12 +98,14 @@ func NewNode(opts *Options) (*Node, error) {
 	)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to instantiate preconf contract")
+		cancel()
 		return nil, err
 	}
 
 	oracleContract, err := rollupclient.NewOracle(opts.OracleContractAddr, settlementClient)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to instantiate oracle contract")
+		cancel()
 		return nil, err
 	}
 
@@ -121,6 +123,7 @@ func NewNode(opts *Options) (*Node, error) {
 			)
 			if err != nil {
 				log.Fatal().Err(err).Msg("failed to set builder mapping")
+				cancel()
 				return nil, err
 			}
 		}

@@ -99,7 +99,7 @@ func (a *Service) registerStatsEndpoints() {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(resp)
+		_, _ = w.Write(resp)
 	})
 
 	a.router.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +119,7 @@ func (a *Service) registerStatsEndpoints() {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(resp)
+		_, _ = w.Write(resp)
 	})
 }
 

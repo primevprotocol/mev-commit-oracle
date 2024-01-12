@@ -305,9 +305,9 @@ func (s *Store) ProcessedBlocks(limit, offset int) ([]BlockInfo, error) {
 }
 
 type CommitmentStats struct {
-	TotalCount           int
-	SlashCount           int
-	SettlementsCompleted int
+	TotalCount                int
+	SlashCount                int
+	SettlementsCompletedCount int
 }
 
 func (s *Store) CommitmentStats() (CommitmentStats, error) {
@@ -322,7 +322,7 @@ func (s *Store) CommitmentStats() (CommitmentStats, error) {
 	`).Scan(
 		&stats.TotalCount,
 		&stats.SlashCount,
-		&stats.SettlementsCompleted,
+		&stats.SettlementsCompletedCount,
 	)
 	if err != nil {
 		return stats, err

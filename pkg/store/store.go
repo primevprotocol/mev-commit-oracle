@@ -243,10 +243,89 @@ func (s *Store) LastNonce() (int64, error) {
 
 func (s *Store) PendingTxnCount() (int, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM settlements WHERE chainhash IS NOT NULL AND settled = false").
-		Scan(&count)
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM settlements WHERE chainhash IS NOT NULL AND settled = false",
+	).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
 	return count, nil
+}
+
+type BlockInfo struct {
+	BlockNumber     int64
+	Builder         string
+	NoOfCommitments int
+	NoOfSlashes     int
+	NoOfSettlements int
+}
+
+func (s *Store) ProcessedBlocks(limit, offset int) ([]BlockInfo, error) {
+	var blocks []BlockInfo
+	rows, err := s.db.Query(`
+		SELECT
+			winners.block_number,
+			winners.builder_address,
+			COUNT(settlements.commitment_index) AS commitment_count,
+			COUNT(settlements.is_slash) AS slash_count,
+			COUNT(settlements.settled) AS settled_count
+		FROM
+			winners
+		LEFT JOIN
+			settlements ON settlements.block_number = winners.block_number
+		WHERE
+			winners.processed = true
+		GROUP BY
+			winners.block_number, winners.builder_address
+		ORDER BY
+			winners.block_number DESC
+		LIMIT $1 OFFSET $2`,
+		limit, offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var b BlockInfo
+		err := rows.Scan(
+			&b.BlockNumber,
+			&b.Builder,
+			&b.NoOfCommitments,
+			&b.NoOfSlashes,
+			&b.NoOfSettlements,
+		)
+		if err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, b)
+	}
+	return blocks, nil
+}
+
+type CommitmentStats struct {
+	TotalCount                int
+	SlashCount                int
+	SettlementsCompletedCount int
+}
+
+func (s *Store) CommitmentStats() (CommitmentStats, error) {
+	var stats CommitmentStats
+	err := s.db.QueryRow(`
+		SELECT
+			COUNT(*),
+			COUNT(is_slash),
+			COUNT(settled)
+		FROM
+			settlements
+	`).Scan(
+		&stats.TotalCount,
+		&stats.SlashCount,
+		&stats.SettlementsCompletedCount,
+	)
+	if err != nil {
+		return stats, err
+	}
+	return stats, nil
 }

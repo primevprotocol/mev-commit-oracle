@@ -12,6 +12,9 @@ builds:
     goarch:
       - amd64
     main: ./cmd
+    flags:
+      - -v
+      - -trimpath
     ldflags:
       - -s -w
 

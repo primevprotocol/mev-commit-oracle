@@ -99,7 +99,10 @@ func (a *Service) registerStatsEndpoints() {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(resp)
+		_, err = w.Write(resp)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to write response")
+		}
 	})
 
 	a.router.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +122,10 @@ func (a *Service) registerStatsEndpoints() {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(resp)
+		_, err = w.Write(resp)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to write response")
+		}
 	})
 }
 

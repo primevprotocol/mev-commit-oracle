@@ -5,6 +5,7 @@ go 1.21.1
 require (
 	github.com/ethereum/go-ethereum v1.13.5
 	github.com/lib/pq v1.10.9
+	github.com/primevprotocol/contracts-abi v0.1.0
 	github.com/prometheus/client_golang v1.14.0
 	github.com/rs/zerolog v1.31.0
 	github.com/urfave/cli/v2 v2.27.1
@@ -42,7 +43,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.14 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
-	github.com/primevprotocol/contracts-abi v0.1.0 // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.39.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect

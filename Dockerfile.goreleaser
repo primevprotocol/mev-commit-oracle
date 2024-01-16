@@ -1,0 +1,7 @@
+FROM alpine:latest
+
+COPY mev-commit-oracle /usr/local/bin/mev-commit-oracle
+
+EXPOSE 8080
+
+ENTRYPOINT ["mev-commit-oracle", "start"]

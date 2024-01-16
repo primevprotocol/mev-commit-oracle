@@ -183,6 +183,7 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 		for {
 			select {
 			case <-ctx.Done():
+				unsub()
 				return
 			case settlement, more := <-settlementChan:
 				if !more {

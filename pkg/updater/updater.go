@@ -87,6 +87,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 		for {
 			select {
 			case <-ctx.Done():
+				unsub()
 				return
 			case winner, more := <-winnerChan:
 				if !more {

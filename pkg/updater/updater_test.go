@@ -120,19 +120,17 @@ func TestUpdater(t *testing.T) {
 		if count == 10 {
 			break
 		}
-		select {
-		case settlement := <-testWinnerRegister.settlements:
-			if settlement.blockNum != 5 {
-				t.Fatal("wrong block number")
-			}
-			if settlement.builder != "test" {
-				t.Fatal("wrong builder")
-			}
-			if settlement.isSlash {
-				t.Fatal("should not be slash")
-			}
-			count++
+		settlement := <-testWinnerRegister.settlements
+		if settlement.blockNum != 5 {
+			t.Fatal("wrong block number")
 		}
+		if settlement.builder != "test" {
+			t.Fatal("wrong builder")
+		}
+		if settlement.isSlash {
+			t.Fatal("should not be slash")
+		}
+		count++
 	}
 
 	select {

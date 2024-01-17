@@ -5,7 +5,7 @@ go 1.21.1
 require (
 	github.com/ethereum/go-ethereum v1.13.5
 	github.com/lib/pq v1.10.9
-	github.com/primevprotocol/contracts-abi v0.1.0
+	github.com/primevprotocol/contracts-abi v0.1.2
 	github.com/prometheus/client_golang v1.14.0
 	github.com/rs/zerolog v1.31.0
 	github.com/urfave/cli/v2 v2.27.1

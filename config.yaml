@@ -2,8 +2,8 @@ priv_key_file: /key
 log_level: debug
 l1_rpc_url: <L1_URL>
 settlement_rpc_url: http://sl-bootnode:8545
-oracle_contract_addr: 0x3F4edEB407aB1Ecca3729C9CD3c9f7DC63b307A3
-preconf_contract_addr: 0xBB632720f817792578060F176694D8f7230229d9
+oracle_contract_addr: 0x943685b6999626D2323526ce3fb6EF1786Ee8Ee3
+preconf_contract_addr: 0x451656c1E7eDf82397EBE04f38819c9970AA3658
 pg_host: oracle-db
 pg_port: 5432
 pg_user: oracle_user

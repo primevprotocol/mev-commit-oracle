@@ -152,9 +152,9 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 							for i := 0; i < len(commitmentTxnHashes) && ok; i++ {
 								if newPos, found := txnsInBlock[commitmentTxnHashes[i]]; !found || newPos != txnsInBlock[commitmentTxnHashes[0]]+i {
 									ok = false
+									break
 								}
 							}
-
 							err = u.winnerRegister.AddSettlement(
 								ctx,
 								index[:],

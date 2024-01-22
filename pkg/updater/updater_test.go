@@ -73,9 +73,25 @@ func TestUpdater(t *testing.T) {
 	commitments := make(map[string]preconf.PreConfCommitmentStorePreConfCommitment)
 	for i, txn := range txns {
 		idxBytes := getIdxBytes(int64(i))
+
 		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
 			Commiter: builderAddr,
 			TxnHash:  txn.Hash().Hex(),
+		}
+	}
+
+	// constructing bundles
+	for i := 0; i < 10; i++ {
+		idxBytes := getIdxBytes(int64(i + 10))
+
+		bundle := txns[i].Hash().Hex()
+		for j := i + 1; j < 10; j++ {
+			bundle += "," + txns[j].Hash().Hex()
+		}
+
+		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
+			Commiter: builderAddr,
+			TxnHash:  bundle,
 		}
 	}
 
@@ -117,7 +133,7 @@ func TestUpdater(t *testing.T) {
 
 	count := 0
 	for {
-		if count == 10 {
+		if count == 20 {
 			break
 		}
 		settlement := <-testWinnerRegister.settlements

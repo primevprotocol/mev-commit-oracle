@@ -239,3 +239,34 @@ func (t *testPreconf) GetCommitment(
 	}
 	return preconf.PreConfCommitmentStorePreConfCommitment{}, errors.New("commitment not found")
 }
+
+func TestCommitmentTarget(t *testing.T) {
+	t.Parallel()
+
+	commitmentTargets := []struct {
+		target               string
+		numberOfTransactions int
+	}{
+		{"0x00000000000000000", 1},
+		{"0x000000000000,0x000000000000", 2},
+		{"0x000000000000,0x000000000000,0x000000000000", 3},
+		{"0x000000000000,0x000000000000,0x000000000000,0x000000000000", 4},
+		{"0x000000000000,0x000000000000,0x000000000000,0x000000000000,0x000000000000", 5},
+		{"0x00", 1},
+		{"0x00,0x00", 2},
+		{"", 1},
+	}
+
+	for _, testPayload := range commitmentTargets {
+		t.Run(testPayload.target, func(t *testing.T) {
+			commitmentTarget := updater.CommitmentTransactionsTarget{Transactions: testPayload.target}
+			if len(commitmentTarget.GetTransactions()) != testPayload.numberOfTransactions {
+				t.Fatalf(
+					"expected %d transactions, got %d",
+					testPayload.numberOfTransactions,
+					len(commitmentTarget.GetTransactions()),
+				)
+			}
+		})
+	}
+}

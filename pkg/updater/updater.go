@@ -206,10 +206,14 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 	return doneChan
 }
 
+// CommitmentTransactionsTarget is a struct that encampsulates the structure of a bundle commitment.
+//
+// The current structure is a comma separated list of transaction hashes.
 type CommitmentTransactionsTarget struct {
 	Transactions string
 }
 
+// GetTransactions returns the list of transaction hashes associated with the bundle in order.
 func (c CommitmentTransactionsTarget) GetTransactions() []string {
 	return strings.Split(c.Transactions, ",")
 }

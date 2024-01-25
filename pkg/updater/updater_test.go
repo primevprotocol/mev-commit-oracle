@@ -5,6 +5,7 @@ import (
 	"errors"
 	"hash"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -275,12 +276,11 @@ func TestCommitmentTarget(t *testing.T) {
 
 	for _, testPayload := range commitmentTargets {
 		t.Run(testPayload.target, func(t *testing.T) {
-			commitmentTarget := updater.CommitmentTransactionsTarget{Transactions: testPayload.target}
-			if len(commitmentTarget.GetTransactions()) != testPayload.numberOfTransactions {
+			if len(strings.Split(testPayload.target, ",")) != testPayload.numberOfTransactions {
 				t.Fatalf(
 					"expected %d transactions, got %d",
 					testPayload.numberOfTransactions,
-					len(commitmentTarget.GetTransactions()),
+					len(strings.Split(testPayload.target, ",")),
 				)
 			}
 		})

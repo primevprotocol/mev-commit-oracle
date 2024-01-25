@@ -5,7 +5,6 @@ import (
 	"errors"
 	"hash"
 	"math/big"
-	"strings"
 	"testing"
 	"time"
 
@@ -255,34 +254,4 @@ func (t *testPreconf) GetCommitment(
 		return commitment, nil
 	}
 	return preconf.PreConfCommitmentStorePreConfCommitment{}, errors.New("commitment not found")
-}
-
-func TestCommitmentTarget(t *testing.T) {
-	t.Parallel()
-
-	commitmentTargets := []struct {
-		target               string
-		numberOfTransactions int
-	}{
-		{"0x00000000000000000", 1},
-		{"0x000000000000,0x000000000000", 2},
-		{"0x000000000000,0x000000000000,0x000000000000", 3},
-		{"0x000000000000,0x000000000000,0x000000000000,0x000000000000", 4},
-		{"0x000000000000,0x000000000000,0x000000000000,0x000000000000,0x000000000000", 5},
-		{"0x00", 1},
-		{"0x00,0x00", 2},
-		{"", 1},
-	}
-
-	for _, testPayload := range commitmentTargets {
-		t.Run(testPayload.target, func(t *testing.T) {
-			if len(strings.Split(testPayload.target, ",")) != testPayload.numberOfTransactions {
-				t.Fatalf(
-					"expected %d transactions, got %d",
-					testPayload.numberOfTransactions,
-					len(strings.Split(testPayload.target, ",")),
-				)
-			}
-		})
-	}
 }

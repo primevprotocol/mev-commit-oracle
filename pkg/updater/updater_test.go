@@ -73,9 +73,25 @@ func TestUpdater(t *testing.T) {
 	commitments := make(map[string]preconf.PreConfCommitmentStorePreConfCommitment)
 	for i, txn := range txns {
 		idxBytes := getIdxBytes(int64(i))
+
 		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
 			Commiter: builderAddr,
 			TxnHash:  txn.Hash().Hex(),
+		}
+	}
+
+	// constructing bundles
+	for i := 0; i < 10; i++ {
+		idxBytes := getIdxBytes(int64(i + 10))
+
+		bundle := txns[i].Hash().Hex()
+		for j := i + 1; j < 10; j++ {
+			bundle += "," + txns[j].Hash().Hex()
+		}
+
+		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
+			Commiter: builderAddr,
+			TxnHash:  bundle,
 		}
 	}
 
@@ -117,7 +133,7 @@ func TestUpdater(t *testing.T) {
 
 	count := 0
 	for {
-		if count == 10 {
+		if count == 20 {
 			break
 		}
 		settlement := <-testWinnerRegister.settlements
@@ -129,6 +145,112 @@ func TestUpdater(t *testing.T) {
 		}
 		if settlement.isSlash {
 			t.Fatal("should not be slash")
+		}
+		count++
+	}
+
+	select {
+	case <-testWinnerRegister.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestUpdaterBundlesFailure(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	builderAddr := common.HexToAddress("0xabcd")
+
+	signer := types.NewLondonSigner(big.NewInt(5))
+	var txns []*types.Transaction
+	for i := 0; i < 10; i++ {
+		txns = append(txns, types.MustSignNewTx(key, signer, &types.DynamicFeeTx{
+			Nonce:     uint64(i + 1),
+			Gas:       1000000,
+			Value:     big.NewInt(1),
+			GasTipCap: big.NewInt(500),
+			GasFeeCap: big.NewInt(500),
+		}))
+	}
+
+	commitments := make(map[string]preconf.PreConfCommitmentStorePreConfCommitment)
+	// constructing bundles
+	for i := 1; i < 10; i++ {
+		idxBytes := getIdxBytes(int64(i))
+
+		bundle := txns[i].Hash().Hex()
+		for j := 10 - i; j > 0; j-- {
+			bundle += "," + txns[j].Hash().Hex()
+		}
+
+		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
+			Commiter: builderAddr,
+			TxnHash:  bundle,
+		}
+	}
+
+	testWinnerRegister := &testWinnerRegister{
+		winners:     make(chan updater.BlockWinner),
+		settlements: make(chan testSettlement),
+		done:        make(chan int64, 1),
+	}
+
+	testL1Client := &testL1Client{
+		blockNum: 5,
+		block:    types.NewBlock(&types.Header{}, txns, nil, nil, NewHasher()),
+	}
+
+	testOracle := &testOracle{
+		builder:     "test",
+		builderAddr: builderAddr,
+	}
+
+	testPreconf := &testPreconf{
+		blockNum:    5,
+		commitments: commitments,
+	}
+
+	updtr := updater.NewUpdater(
+		testL1Client,
+		testWinnerRegister,
+		testOracle,
+		testPreconf,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := updtr.Start(ctx)
+
+	testWinnerRegister.winners <- updater.BlockWinner{
+		BlockNumber: 5,
+		Winner:      "test",
+	}
+
+	count := 0
+	for {
+		if count == 9 {
+			break
+		}
+		settlement := <-testWinnerRegister.settlements
+		if settlement.blockNum != 5 {
+			t.Fatal("wrong block number")
+		}
+		if settlement.builder != "test" {
+			t.Fatal("wrong builder")
+		}
+		if !settlement.isSlash {
+			t.Fatal("should be slash")
 		}
 		count++
 	}

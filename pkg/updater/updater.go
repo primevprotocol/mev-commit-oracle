@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -118,9 +119,9 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 						return fmt.Errorf("failed to get block by number: %w", err)
 					}
 
-					txnsInBlock := make(map[string]struct{})
-					for _, tx := range blk.Transactions() {
-						txnsInBlock[tx.Hash().Hex()] = struct{}{}
+					txnsInBlock := make(map[string]int)
+					for posInBlock, tx := range blk.Transactions() {
+						txnsInBlock[tx.Hash().Hex()] = posInBlock
 					}
 
 					commitmentIndexes, err := u.preconfClient.GetCommitmentsByBlockNumber(
@@ -144,7 +145,16 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 						}
 
 						if commitment.Commiter.Cmp(builderAddr) == 0 {
-							_, ok := txnsInBlock[commitment.TxnHash]
+							commitmentTxnHashes := strings.Split(commitment.TxnHash, ",")
+							ok := true
+
+							// Ensure Bundle is atomic and present in the block
+							for i := 0; i < len(commitmentTxnHashes) && ok; i++ {
+								if newPos, found := txnsInBlock[commitmentTxnHashes[i]]; !found || newPos != txnsInBlock[commitmentTxnHashes[0]]+i {
+									ok = false
+									break
+								}
+							}
 							err = u.winnerRegister.AddSettlement(
 								ctx,
 								index[:],

@@ -13,7 +13,7 @@ import (
 var settlementsTable = `
 CREATE TABLE IF NOT EXISTS settlements (
     commitment_index BYTEA PRIMARY KEY,
-    transaction VARCHAR(255),
+    transaction TEXT,
     block_number BIGINT,
     builder_address BYTEA,
     is_slash BOOLEAN,

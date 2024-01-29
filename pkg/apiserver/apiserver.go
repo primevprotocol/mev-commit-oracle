@@ -83,7 +83,7 @@ func (a *Service) registerStatsEndpoints() {
 			}
 		}
 
-		blocks, err := a.storage.ProcessedBlocks(page, limit)
+		blocks, err := a.storage.ProcessedBlocks(limit, page)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to get processed blocks")
 			w.WriteHeader(http.StatusInternalServerError)

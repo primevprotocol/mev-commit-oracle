@@ -3,12 +3,22 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
 )
+
+var settlementType = `
+DO $$ BEGIN
+    CREATE TYPE settlement_type AS ENUM ('reward', 'slash', 'return');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;`
 
 var settlementsTable = `
 CREATE TABLE IF NOT EXISTS settlements (
@@ -16,9 +26,10 @@ CREATE TABLE IF NOT EXISTS settlements (
     transaction TEXT,
     block_number BIGINT,
     builder_address BYTEA,
-    is_slash BOOLEAN,
-    nonce BIGINT,
+    type settlement_type,
+    amount NUMERIC(24, 0),
     chainhash BYTEA,
+    nonce BIGINT,
     settled BOOLEAN
 );`
 
@@ -36,14 +47,11 @@ type Store struct {
 }
 
 func NewStore(db *sql.DB) (*Store, error) {
-	_, err := db.Exec(settlementsTable)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = db.Exec(winnersTable)
-	if err != nil {
-		return nil, err
+	for _, table := range []string{settlementType, settlementsTable, winnersTable} {
+		_, err := db.Exec(table)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &Store{
@@ -134,14 +142,44 @@ func (s *Store) AddSettlement(
 	commitmentIdx []byte,
 	txHash string,
 	blockNum int64,
+	amount uint64,
 	builder string,
-	isSlash bool,
+	settlementType settler.SettlementType,
 ) error {
-	insertStr := `
-		INSERT INTO settlements (commitment_index, transaction, block_number, builder_address, is_slash, nonce, chainhash, settled)
-		VALUES ($1, $2, $3, $4, $5, 0, NULL, false)`
+	columns := []string{
+		"commitment_index",
+		"transaction",
+		"block_number",
+		"builder_address",
+		"type",
+		"amount",
+		"settled",
+		"chainhash",
+		"nonce",
+	}
+	values := []interface{}{
+		commitmentIdx,
+		txHash,
+		blockNum,
+		builder,
+		settlementType,
+		amount,
+		false,
+		nil,
+		0,
+	}
+	placeholder := make([]string, len(values))
+	for i := range columns {
+		placeholder[i] = fmt.Sprintf("$%d", i+1)
+	}
 
-	_, err := s.db.ExecContext(ctx, insertStr, commitmentIdx, txHash, blockNum, builder, isSlash)
+	insertStr := fmt.Sprintf(
+		"INSERT INTO settlements (%s) VALUES (%s)",
+		strings.Join(columns, ", "),
+		strings.Join(placeholder, ", "),
+	)
+
+	_, err := s.db.ExecContext(ctx, insertStr, values...)
 	if err != nil {
 		return err
 	}
@@ -157,9 +195,10 @@ func (s *Store) SubscribeSettlements(ctx context.Context) <-chan settler.Settlem
 	RETRY:
 		for {
 			queryStr := `
-				SELECT commitment_index, transaction, block_number, builder_address, is_slash
+				SELECT commitment_index, transaction, block_number, builder_address, amount, type
 				FROM settlements
 				WHERE settled = false AND chainhash IS NULL`
+
 			results, err := s.db.QueryContext(ctx, queryStr)
 			if err != nil {
 				return
@@ -173,7 +212,8 @@ func (s *Store) SubscribeSettlements(ctx context.Context) <-chan settler.Settlem
 					&s.TxHash,
 					&s.BlockNum,
 					&s.Builder,
-					&s.IsSlash,
+					&s.Amount,
+					&s.Type,
 				)
 				if err != nil {
 					continue RETRY
@@ -199,16 +239,16 @@ func (s *Store) SubscribeSettlements(ctx context.Context) <-chan settler.Settlem
 
 func (s *Store) SettlementInitiated(
 	ctx context.Context,
-	commitmentIdx []byte,
+	commitmentIndexes [][]byte,
 	txHash common.Hash,
 	nonce uint64,
 ) error {
 	_, err := s.db.ExecContext(
 		ctx,
-		"UPDATE settlements SET chainhash = $1, nonce = $2 WHERE commitment_index = $3",
+		"UPDATE settlements SET chainhash = $1, nonce = $2 WHERE commitment_index = ANY($3::BYTEA[])",
 		txHash.Bytes(),
 		nonce,
-		commitmentIdx,
+		pq.Array(commitmentIndexes),
 	)
 	if err != nil {
 		return err
@@ -244,7 +284,7 @@ func (s *Store) LastNonce() (int64, error) {
 func (s *Store) PendingTxnCount() (int, error) {
 	var count int
 	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM settlements WHERE chainhash IS NOT NULL AND settled = false",
+		"SELECT COUNT(DISTINCT chainhash) FROM settlements WHERE chainhash IS NOT NULL AND settled = false",
 	).Scan(&count)
 	if err != nil {
 		return 0, err
@@ -256,7 +296,11 @@ type BlockInfo struct {
 	BlockNumber     int64
 	Builder         string
 	NoOfCommitments int
+	TotalAmount     int
+	NoOfRewards     int
+	TotalRewards    int
 	NoOfSlashes     int
+	TotalSlashes    int
 	NoOfSettlements int
 }
 
@@ -267,7 +311,11 @@ func (s *Store) ProcessedBlocks(limit, offset int) ([]BlockInfo, error) {
 			winners.block_number,
 			winners.builder_address,
 			COUNT(settlements.commitment_index) AS commitment_count,
-			COUNT(settlements.is_slash) AS slash_count,
+			SUM(settlements.amount) AS total_amount,
+			COUNT(settlements.type = 'reward' OR NULL) AS reward_count,
+			SUM(settlements.amount) FILTER (WHERE settlements.type = 'reward') AS total_rewards,
+			COUNT(settlements.type = 'slash' OR NULL) AS slash_count,
+			SUM(settlements.amount) FILTER (WHERE settlements.type = 'slash') AS total_slashes,
 			COUNT(settlements.settled) AS settled_count
 		FROM
 			winners
@@ -293,7 +341,11 @@ func (s *Store) ProcessedBlocks(limit, offset int) ([]BlockInfo, error) {
 			&b.BlockNumber,
 			&b.Builder,
 			&b.NoOfCommitments,
+			&b.TotalAmount,
+			&b.NoOfRewards,
+			&b.TotalRewards,
 			&b.NoOfSlashes,
+			&b.TotalSlashes,
 			&b.NoOfSettlements,
 		)
 		if err != nil {
@@ -306,6 +358,7 @@ func (s *Store) ProcessedBlocks(limit, offset int) ([]BlockInfo, error) {
 
 type CommitmentStats struct {
 	TotalCount                int
+	RewardCount               int
 	SlashCount                int
 	SettlementsCompletedCount int
 }
@@ -315,12 +368,14 @@ func (s *Store) CommitmentStats() (CommitmentStats, error) {
 	err := s.db.QueryRow(`
 		SELECT
 			COUNT(*),
-			COUNT(is_slash),
+			COUNT(type = 'reward' OR NULL),
+			COUNT(type = 'slash' OR NULL),
 			COUNT(settled)
 		FROM
 			settlements
 	`).Scan(
 		&stats.TotalCount,
+		&stats.RewardCount,
 		&stats.SlashCount,
 		&stats.SettlementsCompletedCount,
 	)

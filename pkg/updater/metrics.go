@@ -9,7 +9,8 @@ const (
 
 type metrics struct {
 	UpdaterTriggerCount   prometheus.Counter
-	CommimentsCount       prometheus.Counter
+	CommitmentsCount      prometheus.Counter
+	RewardsCount          prometheus.Counter
 	SlashesCount          prometheus.Counter
 	BlockCommitmentsCount prometheus.Counter
 }
@@ -24,12 +25,20 @@ func newMetrics() *metrics {
 			Help:      "Number of times the updater was triggered",
 		},
 	)
-	m.CommimentsCount = prometheus.NewCounter(
+	m.CommitmentsCount = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: defaultNamespace,
 			Subsystem: subsystem,
-			Name:      "commiments_count",
+			Name:      "commitments_count",
 			Help:      "Number of commitments processed",
+		},
+	)
+	m.RewardsCount = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: defaultNamespace,
+			Subsystem: subsystem,
+			Name:      "rewards_count",
+			Help:      "Number of rewards",
 		},
 	)
 	m.SlashesCount = prometheus.NewCounter(
@@ -54,7 +63,8 @@ func newMetrics() *metrics {
 func (m *metrics) Collectors() []prometheus.Collector {
 	return []prometheus.Collector{
 		m.UpdaterTriggerCount,
-		m.CommimentsCount,
+		m.CommitmentsCount,
+		m.RewardsCount,
 		m.SlashesCount,
 		m.BlockCommitmentsCount,
 	}

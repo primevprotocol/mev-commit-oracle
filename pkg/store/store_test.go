@@ -38,7 +38,12 @@ func TestStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start PostgreSQL container: %s", err)
 	}
-	defer postgresContainer.Terminate(ctx)
+	defer func() {
+		err := postgresContainer.Terminate(ctx)
+		if err != nil {
+			t.Errorf("Failed to terminate PostgreSQL container: %s", err)
+		}
+	}()
 
 	// Retrieve the container's mapped port
 	mappedPort, err := postgresContainer.MappedPort(ctx, "5432")

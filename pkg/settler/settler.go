@@ -282,8 +282,6 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 						return err
 					}
 
-					commitmentIndexes = commitmentIndexes[:0]
-
 					s.metrics.LastUsedNonce.Set(float64(commitmentPostingTxn.Nonce()))
 					s.metrics.SettlementsPostedCount.Inc()
 					s.metrics.CurrentSettlementL1Block.Set(float64(settlement.BlockNum))

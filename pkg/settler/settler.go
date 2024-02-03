@@ -2,7 +2,6 @@ package settler
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"errors"
 	"math/big"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 )
@@ -51,7 +51,7 @@ type Transactor interface {
 }
 
 type Settler struct {
-	privateKey      *ecdsa.PrivateKey
+	keySigner       keysigner.KeySigner
 	chainID         *big.Int
 	owner           common.Address
 	rollupClient    Oracle
@@ -61,7 +61,7 @@ type Settler struct {
 }
 
 func NewSettler(
-	privateKey *ecdsa.PrivateKey,
+	keySigner keysigner.KeySigner,
 	chainID *big.Int,
 	owner common.Address,
 	rollupClient Oracle,
@@ -73,14 +73,14 @@ func NewSettler(
 		settlerRegister: settlerRegister,
 		owner:           owner,
 		client:          client,
-		privateKey:      privateKey,
+		keySigner:       keySigner,
 		chainID:         chainID,
 		metrics:         newMetrics(),
 	}
 }
 
 func (s *Settler) getTransactOpts(ctx context.Context) (*bind.TransactOpts, error) {
-	auth, err := bind.NewKeyedTransactorWithChainID(s.privateKey, s.chainID)
+	auth, err := s.keySigner.GetAuth(s.chainID)
 	if err != nil {
 		return nil, err
 	}

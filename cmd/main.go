@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/primevprotocol/mev-oracle/pkg/node"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -53,6 +55,8 @@ func main() {
 
 type config struct {
 	PrivKeyFile         string   `yaml:"priv_key_file" json:"priv_key_file"`
+	KeystorePath        string   `yaml:"keystore_path" json:"keystore_path"`
+	KeystorePassword    string   `yaml:"keystore_password" json:"keystore_password"`
 	HTTPPort            int      `yaml:"http_port" json:"http_port"`
 	LogLevel            string   `yaml:"log_level" json:"log_level"`
 	L1RPCUrl            string   `yaml:"l1_rpc_url" json:"l1_rpc_url"`
@@ -69,8 +73,8 @@ type config struct {
 }
 
 func checkConfig(cfg *config) error {
-	if cfg.PrivKeyFile == "" {
-		return fmt.Errorf("priv_key_file is required")
+	if cfg.PrivKeyFile == "" && (cfg.KeystorePath == "" || cfg.KeystorePassword == "") {
+		return fmt.Errorf("priv_key_file or keystore_path and keystore_password are required")
 	}
 
 	if cfg.HTTPPort == 0 {
@@ -131,25 +135,15 @@ func start(c *cli.Context) error {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(os.Stdout).With().Caller().Logger()
 
-	privKeyFile := cfg.PrivKeyFile
-	if strings.HasPrefix(privKeyFile, "~/") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get user home directory: %w", err)
-		}
-
-		privKeyFile = filepath.Join(homeDir, privKeyFile[2:])
-	}
-
-	privKey, err := crypto.LoadECDSA(privKeyFile)
+	keySigner, err := setupKeySigner(&cfg)
 	if err != nil {
-		return fmt.Errorf("failed to load private key from file '%s': %w", cfg.PrivKeyFile, err)
+		return fmt.Errorf("failed to setup key signer: %w", err)
 	}
 
 	common.HexToAddress(cfg.OracleContractAddr)
 
 	nd, err := node.NewNode(&node.Options{
-		PrivateKey:          privKey,
+		KeySigner:           keySigner,
 		HTTPPort:            cfg.HTTPPort,
 		L1RPCUrl:            cfg.L1RPCUrl,
 		SettlementRPCUrl:    cfg.SettlementRPCUrl,
@@ -187,4 +181,41 @@ func start(c *cli.Context) error {
 	}
 
 	return nil
+}
+
+func setupKeySigner(cfg *config) (keysigner.KeySigner, error) {
+	if cfg.PrivKeyFile == "" {
+		return setupKeystoreSigner(cfg)
+	}
+	return setupPrivateKeySigner(cfg)
+}
+
+func setupKeystoreSigner(cfg *config) (keysigner.KeySigner, error) {
+	// Load the keystore file
+	ks := keystore.NewKeyStore(cfg.KeystorePath, keystore.LightScryptN, keystore.LightScryptP)
+	accounts := ks.Accounts()
+	if len(accounts) == 0 {
+		return nil, fmt.Errorf("no accounts found in keystore, path: %s", cfg.KeystorePath)
+	}
+
+	account := accounts[0]
+	return keysigner.NewKeystoreSigner(ks, cfg.KeystorePassword, account), nil
+}
+
+func setupPrivateKeySigner(cfg *config) (keysigner.KeySigner, error) {
+	privKeyFile := cfg.PrivKeyFile
+	if strings.HasPrefix(privKeyFile, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user home directory: %w", err)
+		}
+
+		privKeyFile = filepath.Join(homeDir, privKeyFile[2:])
+	}
+
+	privKey, err := crypto.LoadECDSA(privKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load private key from file '%s': %w", cfg.PrivKeyFile, err)
+	}
+	return keysigner.NewPrivateKeySigner(privKey), nil
 }

@@ -9,6 +9,7 @@ FROM alpine:latest
 
 COPY --from=builder /app/mev-commit-oracle /usr/local/bin/mev-commit-oracle
 COPY --from=builder /app/key /key
+COPY --from=builder /app/keystore /keystore
 COPY --from=builder /app/config.yaml /config.yaml
 COPY --from=builder /app/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

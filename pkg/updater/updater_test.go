@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
+	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
 	"golang.org/x/crypto/sha3"
 )
@@ -57,6 +58,7 @@ func TestUpdater(t *testing.T) {
 	}
 
 	builderAddr := common.HexToAddress("0xabcd")
+	otherBuilderAddr := common.HexToAddress("0xabdc")
 
 	signer := types.NewLondonSigner(big.NewInt(5))
 	var txns []*types.Transaction
@@ -74,9 +76,16 @@ func TestUpdater(t *testing.T) {
 	for i, txn := range txns {
 		idxBytes := getIdxBytes(int64(i))
 
-		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-			Commiter: builderAddr,
-			TxnHash:  txn.Hash().Hex(),
+		if i%2 == 0 {
+			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
+				Commiter: builderAddr,
+				TxnHash:  txn.Hash().Hex(),
+			}
+		} else {
+			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
+				Commiter: otherBuilderAddr,
+				TxnHash:  txn.Hash().Hex(),
+			}
 		}
 	}
 
@@ -132,6 +141,7 @@ func TestUpdater(t *testing.T) {
 	}
 
 	count := 0
+	rewards, returns := 0, 0
 	for {
 		if count == 20 {
 			break
@@ -143,10 +153,23 @@ func TestUpdater(t *testing.T) {
 		if settlement.builder != "test" {
 			t.Fatal("wrong builder")
 		}
-		if settlement.isSlash {
+		if settlement.settlementType == settler.SettlementTypeSlash {
 			t.Fatal("should not be slash")
 		}
+		if settlement.settlementType == settler.SettlementTypeReward {
+			rewards++
+		}
+		if settlement.settlementType == settler.SettlementTypeReturn {
+			returns++
+		}
 		count++
+	}
+
+	if rewards != 15 {
+		t.Fatal("wrong rewards count")
+	}
+	if returns != 5 {
+		t.Fatal("wrong returns count")
 	}
 
 	select {
@@ -249,8 +272,8 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 		if settlement.builder != "test" {
 			t.Fatal("wrong builder")
 		}
-		if !settlement.isSlash {
-			t.Fatal("should be slash")
+		if settlement.settlementType != settler.SettlementTypeSlash {
+			t.Fatalf("should be slash, got %s", settlement.settlementType)
 		}
 		count++
 	}
@@ -270,11 +293,12 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 }
 
 type testSettlement struct {
-	commitmentIdx []byte
-	txHash        string
-	blockNum      int64
-	builder       string
-	isSlash       bool
+	commitmentIdx  []byte
+	txHash         string
+	blockNum       int64
+	builder        string
+	amount         uint64
+	settlementType settler.SettlementType
 }
 
 type testWinnerRegister struct {
@@ -297,15 +321,17 @@ func (t *testWinnerRegister) AddSettlement(
 	commitmentIdx []byte,
 	txHash string,
 	blockNum int64,
+	amount uint64,
 	builder string,
-	isSlash bool,
+	settlementType settler.SettlementType,
 ) error {
 	t.settlements <- testSettlement{
-		commitmentIdx: commitmentIdx,
-		txHash:        txHash,
-		blockNum:      blockNum,
-		builder:       builder,
-		isSlash:       isSlash,
+		commitmentIdx:  commitmentIdx,
+		txHash:         txHash,
+		blockNum:       blockNum,
+		amount:         amount,
+		builder:        builder,
+		settlementType: settlementType,
 	}
 	return nil
 }

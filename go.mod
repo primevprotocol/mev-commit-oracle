@@ -6,13 +6,12 @@ require (
 	github.com/ethereum/go-ethereum v1.13.5
 	github.com/google/go-cmp v0.6.0
 	github.com/lib/pq v1.10.9
-	github.com/primevprotocol/contracts-abi v0.1.3-0.20240131094253-30834a4dec8d
+	github.com/primevprotocol/contracts-abi v0.1.3-rc1
 	github.com/prometheus/client_golang v1.14.0
 	github.com/rs/zerolog v1.31.0
 	github.com/testcontainers/testcontainers-go v0.27.0
 	github.com/urfave/cli/v2 v2.27.1
 	golang.org/x/crypto v0.18.0
-	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (

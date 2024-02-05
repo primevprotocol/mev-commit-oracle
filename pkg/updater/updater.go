@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
+	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 )
@@ -28,8 +29,9 @@ type WinnerRegister interface {
 		commitmentIdx []byte,
 		txHash string,
 		blockNum int64,
+		amount uint64,
 		builder string,
-		isSlash bool,
+		settlementType settler.SettlementType,
 	) error
 }
 
@@ -137,39 +139,48 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 						Int64("blockNumber", winner.BlockNumber).
 						Msg("commitment indexes")
 
-					count, slashes := 0, 0
+					total, rewards, slashes := 0, 0, 0
 					for _, index := range commitmentIndexes {
 						commitment, err := u.preconfClient.GetCommitment(index)
 						if err != nil {
 							return fmt.Errorf("failed to get commitment: %w", err)
 						}
 
+						settlementType := settler.SettlementTypeReturn
+
 						if commitment.Commiter.Cmp(builderAddr) == 0 {
 							commitmentTxnHashes := strings.Split(commitment.TxnHash, ",")
-							ok := true
+							settlementType = settler.SettlementTypeReward
 
 							// Ensure Bundle is atomic and present in the block
-							for i := 0; i < len(commitmentTxnHashes) && ok; i++ {
-								if newPos, found := txnsInBlock[commitmentTxnHashes[i]]; !found || newPos != txnsInBlock[commitmentTxnHashes[0]]+i {
-									ok = false
+							for i := 0; i < len(commitmentTxnHashes); i++ {
+								posInBlock, found := txnsInBlock[commitmentTxnHashes[i]]
+								if !found || posInBlock != txnsInBlock[commitmentTxnHashes[0]]+i {
+									settlementType = settler.SettlementTypeSlash
 									break
 								}
 							}
-							err = u.winnerRegister.AddSettlement(
-								ctx,
-								index[:],
-								commitment.TxnHash,
-								winner.BlockNumber,
-								winner.Winner,
-								!ok,
-							)
-							if err != nil {
-								return fmt.Errorf("failed to add settlement: %w", err)
-							}
-							count++
-							if !ok {
-								slashes++
-							}
+						}
+
+						err = u.winnerRegister.AddSettlement(
+							ctx,
+							index[:],
+							commitment.TxnHash,
+							winner.BlockNumber,
+							commitment.Bid,
+							winner.Winner,
+							settlementType,
+						)
+						if err != nil {
+							return fmt.Errorf("failed to add settlement: %w", err)
+						}
+
+						total++
+						switch settlementType {
+						case settler.SettlementTypeSlash:
+							slashes++
+						case settler.SettlementTypeReward:
+							rewards++
 						}
 					}
 
@@ -178,12 +189,15 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 						return fmt.Errorf("failed to update completion of block updates: %w", err)
 					}
 
-					u.metrics.CommimentsCount.Add(float64(len(commitmentIndexes)))
-					u.metrics.BlockCommitmentsCount.Inc()
+					u.metrics.CommitmentsCount.Add(float64(total))
+					u.metrics.RewardsCount.Add(float64(rewards))
 					u.metrics.SlashesCount.Add(float64(slashes))
+					u.metrics.BlockCommitmentsCount.Inc()
 
 					log.Info().
-						Int("count", count).
+						Int("total", total).
+						Int("rewards", rewards).
+						Int("slashes", slashes).
 						Int64("blockNumber", winner.BlockNumber).
 						Str("winner", winner.Winner).
 						Msg("added settlements")

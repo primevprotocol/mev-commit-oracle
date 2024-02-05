@@ -16,6 +16,15 @@ import (
 
 var (
 	allowedPendingTxnCount = 128
+	batchSize              = 10
+)
+
+type SettlementType string
+
+const (
+	SettlementTypeReward SettlementType = "reward"
+	SettlementTypeSlash  SettlementType = "slash"
+	SettlementTypeReturn SettlementType = "return"
 )
 
 type Settlement struct {
@@ -23,14 +32,15 @@ type Settlement struct {
 	TxHash        string
 	BlockNum      int64
 	Builder       string
-	IsSlash       bool
+	Amount        uint64
+	Type          SettlementType
 }
 
 type SettlerRegister interface {
 	LastNonce() (int64, error)
 	PendingTxnCount() (int, error)
 	SubscribeSettlements(ctx context.Context) <-chan Settlement
-	SettlementInitiated(ctx context.Context, commitmentIdx []byte, txHash common.Hash, nonce uint64) error
+	SettlementInitiated(ctx context.Context, commitmentIdx [][]byte, txHash common.Hash, nonce uint64) error
 	MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error)
 }
 
@@ -42,10 +52,13 @@ type Oracle interface {
 		builder string,
 		isSlash bool,
 	) (*types.Transaction, error)
+	UnlockFunds(opts *bind.TransactOpts, bidIDs [][32]byte) (*types.Transaction, error)
 }
 
 type Transactor interface {
-	bind.ContractTransactor
+	PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
+	SuggestGasPrice(ctx context.Context) (*big.Int, error)
+	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
 	NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error)
 	BlockNumber(ctx context.Context) (uint64, error)
 }
@@ -179,6 +192,7 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 	RESTART:
 		cctx, unsub := context.WithCancel(ctx)
 		settlementChan := s.settlerRegister.SubscribeSettlements(cctx)
+		returns := make([][32]byte, 0, batchSize)
 
 		for {
 			select {
@@ -202,28 +216,65 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 						return errors.New("too many pending txns")
 					}
 
-					opts, err := s.getTransactOpts(ctx)
-					if err != nil {
-						return err
+					var (
+						commitmentIdx        [32]byte
+						commitmentIndexes    [][]byte
+						commitmentPostingTxn *types.Transaction
+						opts                 *bind.TransactOpts
+					)
+
+					// if we are batching returns, we don't want to post the txn until we have a full batch
+					if settlement.Type != SettlementTypeReturn || len(returns) == batchSize-1 {
+						opts, err = s.getTransactOpts(ctx)
+						if err != nil {
+							return err
+						}
 					}
 
-					var commitmentIdx [32]byte
 					copy(commitmentIdx[:], settlement.CommitmentIdx)
 
-					commitmentPostingTxn, err := s.rollupClient.ProcessBuilderCommitmentForBlockNumber(
-						opts,
-						commitmentIdx,
-						big.NewInt(settlement.BlockNum),
-						settlement.Builder,
-						settlement.IsSlash,
-					)
-					if err != nil {
-						return err
+					switch settlement.Type {
+					case SettlementTypeReward:
+						fallthrough
+					case SettlementTypeSlash:
+						commitmentPostingTxn, err = s.rollupClient.ProcessBuilderCommitmentForBlockNumber(
+							opts,
+							commitmentIdx,
+							big.NewInt(settlement.BlockNum),
+							settlement.Builder,
+							settlement.Type == SettlementTypeSlash,
+						)
+						if err != nil {
+							return err
+						}
+						commitmentIndexes = [][]byte{commitmentIdx[:]}
+					case SettlementTypeReturn:
+						returns = append(returns, commitmentIdx)
+						if len(returns) == batchSize {
+							commitmentPostingTxn, err = s.rollupClient.UnlockFunds(
+								opts,
+								returns,
+							)
+							if err != nil {
+								return err
+							}
+							for _, idx := range returns {
+								commitmentIndexes = append(commitmentIndexes, idx[:])
+							}
+							// reset batch
+							returns = returns[:0]
+						}
+					}
+
+					if commitmentPostingTxn == nil {
+						// if we are batching returns, we don't want to post the txn
+						// until we have a full batch
+						return nil
 					}
 
 					err = s.settlerRegister.SettlementInitiated(
 						ctx,
-						settlement.CommitmentIdx,
+						commitmentIndexes,
 						commitmentPostingTxn.Hash(),
 						commitmentPostingTxn.Nonce(),
 					)
@@ -239,7 +290,7 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 						Int64("blockNum", settlement.BlockNum).
 						Str("txHash", commitmentPostingTxn.Hash().Hex()).
 						Str("builder", settlement.Builder).
-						Bool("isSlash", settlement.IsSlash).
+						Str("settlementType", string(settlement.Type)).
 						Msg("builder commitment processed")
 
 					return nil

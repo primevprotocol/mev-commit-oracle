@@ -1,47 +1,191 @@
 package main
 
 import (
+	"crypto/ecdsa"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	contracts "github.com/primevprotocol/contracts-abi/config"
 	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/primevprotocol/mev-oracle/pkg/node"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
-	"gopkg.in/yaml.v2"
+	"github.com/urfave/cli/v2/altsrc"
+	"golang.org/x/crypto/sha3"
 )
 
 const (
-	defaultHTTPPort = 8080
+	defaultHTTPPort  = 8080
+	defaultConfigDir = "~/.mev-commit-oracle"
+	defaultKeyFile   = "key"
+	defaultKeystore  = "keystore"
 )
 
 var (
 	optionConfig = &cli.StringFlag{
-		Name:     "config",
-		Usage:    "path to config file",
-		Required: true,
-		EnvVars:  []string{"MEV_ORACLE_CONFIG"},
+		Name:    "config",
+		Usage:   "path to config file",
+		EnvVars: []string{"MEV_ORACLE_CONFIG"},
 	}
+
+	optionPrivKeyFile = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "priv-key-file",
+		Usage:   "path to private key file",
+		EnvVars: []string{"MEV_ORACLE_PRIV_KEY_FILE"},
+		Value:   filepath.Join(defaultConfigDir, defaultKeyFile),
+	})
+
+	optionHTTPPort = altsrc.NewIntFlag(&cli.IntFlag{
+		Name:    "http-port",
+		Usage:   "port to listen on for HTTP requests",
+		EnvVars: []string{"MEV_ORACLE_HTTP_PORT"},
+		Value:   defaultHTTPPort,
+		Action: func(c *cli.Context, p int) error {
+			if p < 0 || p > 65535 {
+				return fmt.Errorf("invalid port number: %d", p)
+			}
+			return nil
+		},
+	})
+
+	optionLogLevel = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "log-level",
+		Usage:   "log level",
+		EnvVars: []string{"MEV_ORACLE_LOG_LEVEL"},
+		Value:   "info",
+		Action: func(c *cli.Context, l string) error {
+			_, err := zerolog.ParseLevel(l)
+			return err
+		},
+	})
+
+	optionL1RPCUrl = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:     "l1-rpc-url",
+		Usage:    "URL for L1 RPC",
+		EnvVars:  []string{"MEV_ORACLE_L1_RPC_URL"},
+		Required: true,
+	})
+
+	optionSettlementRPCUrl = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "settlement-rpc-url",
+		Usage:   "URL for settlement RPC",
+		EnvVars: []string{"MEV_ORACLE_SETTLEMENT_RPC_URL"},
+		Value:   "http://localhost:8545",
+	})
+
+	optionOracleContractAddr = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "oracle-contract-addr",
+		Usage:   "address of the oracle contract",
+		EnvVars: []string{"MEV_ORACLE_ORACLE_CONTRACT_ADDR"},
+		Value:   contracts.TestnetContracts.Oracle,
+	})
+
+	optionPreconfContractAddr = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "preconf-contract-addr",
+		Usage:   "address of the preconf contract",
+		EnvVars: []string{"MEV_ORACLE_PRECONF_CONTRACT_ADDR"},
+		Value:   contracts.TestnetContracts.PreconfCommitmentStore,
+	})
+
+	optionPgHost = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "pg-host",
+		Usage:   "PostgreSQL host",
+		EnvVars: []string{"MEV_ORACLE_PG_HOST"},
+		Value:   "localhost",
+	})
+
+	optionPgPort = altsrc.NewIntFlag(&cli.IntFlag{
+		Name:    "pg-port",
+		Usage:   "PostgreSQL port",
+		EnvVars: []string{"MEV_ORACLE_PG_PORT"},
+		Value:   5432,
+	})
+
+	optionPgUser = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "pg-user",
+		Usage:   "PostgreSQL user",
+		EnvVars: []string{"MEV_ORACLE_PG_USER"},
+		Value:   "postgres",
+	})
+
+	optionPgPassword = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "pg-password",
+		Usage:   "PostgreSQL password",
+		EnvVars: []string{"MEV_ORACLE_PG_PASSWORD"},
+		Value:   "postgres",
+	})
+
+	optionPgDbname = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "pg-dbname",
+		Usage:   "PostgreSQL database name",
+		EnvVars: []string{"MEV_ORACLE_PG_DBNAME"},
+		Value:   "mev_oracle",
+	})
+
+	optionLaggerdMode = altsrc.NewIntFlag(&cli.IntFlag{
+		Name:    "laggerd-mode",
+		Usage:   "No of blocks to lag behind for L1 chain",
+		EnvVars: []string{"MEV_ORACLE_LAGGERD_MODE"},
+		Value:   0,
+	})
+
+	optionOverrideWinners = altsrc.NewStringSliceFlag(&cli.StringSliceFlag{
+		Name:    "override-winners",
+		Usage:   "Override winners for testing",
+		EnvVars: []string{"MEV_ORACLE_OVERRIDE_WINNERS"},
+	})
+
+	optionKeystorePassword = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "keystore-password",
+		Usage:   "use to access keystore",
+		EnvVars: []string{"MEV_COMMIT_KEYSTORE_PASSWORD"},
+	})
+
+	optionKeystorePath = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "keystore-path",
+		Usage:   "path to keystore location",
+		EnvVars: []string{"MEV_COMMIT_KEYSTORE_PATH"},
+		Value:   filepath.Join(defaultConfigDir, defaultKeystore),
+	})
 )
 
 func main() {
+	flags := []cli.Flag{
+		optionConfig,
+		optionPrivKeyFile,
+		optionHTTPPort,
+		optionLogLevel,
+		optionL1RPCUrl,
+		optionSettlementRPCUrl,
+		optionOracleContractAddr,
+		optionPreconfContractAddr,
+		optionPgHost,
+		optionPgPort,
+		optionPgUser,
+		optionPgPassword,
+		optionPgDbname,
+		optionLaggerdMode,
+		optionOverrideWinners,
+		optionKeystorePath,
+		optionKeystorePassword,
+	}
 	app := &cli.App{
 		Name:  "mev-oracle",
 		Usage: "Entry point for mev-oracle",
 		Commands: []*cli.Command{
 			{
-				Name:  "start",
-				Usage: "Start the mev-oracle node",
-				Flags: []cli.Flag{
-					optionConfig,
-				},
+				Name:   "start",
+				Usage:  "Start the mev-oracle node",
+				Flags:  flags,
+				Before: altsrc.InitInputSourceWithContext(flags, altsrc.NewYamlSourceFromFlagFunc(optionConfig.Name)),
 				Action: func(c *cli.Context) error {
 					return start(c)
 				},
@@ -53,109 +197,98 @@ func main() {
 	}
 }
 
-type config struct {
-	PrivKeyFile         string   `yaml:"priv_key_file" json:"priv_key_file"`
-	KeystorePath        string   `yaml:"keystore_path" json:"keystore_path"`
-	KeystorePassword    string   `yaml:"keystore_password" json:"keystore_password"`
-	HTTPPort            int      `yaml:"http_port" json:"http_port"`
-	LogLevel            string   `yaml:"log_level" json:"log_level"`
-	L1RPCUrl            string   `yaml:"l1_rpc_url" json:"l1_rpc_url"`
-	SettlementRPCUrl    string   `yaml:"settlement_rpc_url" json:"settlement_rpc_url"`
-	OracleContractAddr  string   `yaml:"oracle_contract_addr" json:"oracle_contract_addr"`
-	PreconfContractAddr string   `yaml:"preconf_contract_addr" json:"preconf_contract_addr"`
-	PgHost              string   `yaml:"pg_host" json:"pg_host"`
-	PgPort              int      `yaml:"pg_port" json:"pg_port"`
-	PgUser              string   `yaml:"pg_user" json:"pg_user"`
-	PgPassword          string   `yaml:"pg_password" json:"pg_password"`
-	PgDbname            string   `yaml:"pg_dbname" json:"pg_dbname"`
-	LaggerdMode         int      `yaml:"laggerd_mode" json:"laggerd_mode"`
-	OverrideWinners     []string `yaml:"override_winners" json:"override_winners"`
-}
-
-func checkConfig(cfg *config) error {
-	if cfg.PrivKeyFile == "" && (cfg.KeystorePath == "" || cfg.KeystorePassword == "") {
-		return fmt.Errorf("priv_key_file or keystore_path and keystore_password are required")
+func createKeyIfNotExists(c *cli.Context, path string) error {
+	// check if key already exists
+	if _, err := os.Stat(path); err == nil {
+		fmt.Fprintf(c.App.Writer, "Using existing private key: %s\n", path)
+		return nil
 	}
 
-	if cfg.HTTPPort == 0 {
-		cfg.HTTPPort = defaultHTTPPort
+	fmt.Fprintf(c.App.Writer, "Creating new private key: %s\n", path)
+
+	// check if parent directory exists
+	if _, err := os.Stat(filepath.Dir(path)); os.IsNotExist(err) {
+		// create parent directory
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return err
+		}
 	}
 
-	if cfg.LogLevel == "" {
-		cfg.LogLevel = "info"
+	privKey, err := crypto.GenerateKey()
+	if err != nil {
+		return err
 	}
 
-	if cfg.L1RPCUrl == "" {
-		return fmt.Errorf("l1_rpc_url is required")
+	f, err := os.Create(path)
+	if err != nil {
+		return err
 	}
 
-	if cfg.SettlementRPCUrl == "" {
-		return fmt.Errorf("settlement_rpc_url is required")
+	defer f.Close()
+
+	if err := crypto.SaveECDSA(path, privKey); err != nil {
+		return err
 	}
 
-	if cfg.OracleContractAddr == "" {
-		return fmt.Errorf("oracle_contract_addr is required")
-	}
+	wallet := getEthAddressFromPubKey(&privKey.PublicKey)
 
-	if cfg.PreconfContractAddr == "" {
-		return fmt.Errorf("preconf_contract_addr is required")
-	}
-
-	if cfg.PgHost == "" || cfg.PgPort == 0 || cfg.PgUser == "" || cfg.PgPassword == "" || cfg.PgDbname == "" {
-		return fmt.Errorf("pg_host, pg_port, pg_user, pg_password, pg_dbname are required")
-	}
-
+	fmt.Fprintf(c.App.Writer, "Private key saved to file: %s\n", path)
+	fmt.Fprintf(c.App.Writer, "Wallet address: %s\n", wallet.Hex())
 	return nil
 }
 
+func resolveFilePath(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+
+	if strings.HasPrefix(path, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+
+		return filepath.Join(home, path[1:]), nil
+	}
+
+	return path, nil
+}
+
+func getEthAddressFromPubKey(key *ecdsa.PublicKey) common.Address {
+	pbBytes := crypto.FromECDSAPub(key)
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(pbBytes[1:])
+	address := hash.Sum(nil)[12:]
+
+	return common.BytesToAddress(address)
+}
+
 func start(c *cli.Context) error {
-	configFile := c.String(optionConfig.Name)
-	fmt.Fprintf(c.App.Writer, "starting mev-oracle with config file: %s\n", configFile)
-
-	var cfg config
-	buf, err := os.ReadFile(configFile)
+	keySigner, err := setupKeySigner(c)
 	if err != nil {
-		return fmt.Errorf("failed to read config file at '%s': %w", configFile, err)
+		return fmt.Errorf("failed to setup key signer: %w", err)
 	}
 
-	if err := yaml.Unmarshal(buf, &cfg); err != nil {
-		return fmt.Errorf("failed to unmarshal config file at '%s': %w", configFile, err)
-	}
-
-	if err := checkConfig(&cfg); err != nil {
-		return fmt.Errorf("invalid config file at '%s': %w", configFile, err)
-	}
-
-	lvl, err := zerolog.ParseLevel(cfg.LogLevel)
-	if err != nil {
-		return fmt.Errorf("failed to parse log level '%s': %w", cfg.LogLevel, err)
-	}
+	lvl, _ := zerolog.ParseLevel(c.String(optionLogLevel.Name))
 
 	zerolog.SetGlobalLevel(lvl)
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(os.Stdout).With().Caller().Logger()
 
-	keySigner, err := setupKeySigner(&cfg)
-	if err != nil {
-		return fmt.Errorf("failed to setup key signer: %w", err)
-	}
-
-	common.HexToAddress(cfg.OracleContractAddr)
-
 	nd, err := node.NewNode(&node.Options{
 		KeySigner:           keySigner,
-		HTTPPort:            cfg.HTTPPort,
-		L1RPCUrl:            cfg.L1RPCUrl,
-		SettlementRPCUrl:    cfg.SettlementRPCUrl,
-		OracleContractAddr:  common.HexToAddress(cfg.OracleContractAddr),
-		PreconfContractAddr: common.HexToAddress(cfg.PreconfContractAddr),
-		PgHost:              cfg.PgHost,
-		PgPort:              cfg.PgPort,
-		PgUser:              cfg.PgUser,
-		PgPassword:          cfg.PgPassword,
-		PgDbname:            cfg.PgDbname,
-		LaggerdMode:         cfg.LaggerdMode,
-		OverrideWinners:     cfg.OverrideWinners,
+		HTTPPort:            c.Int(optionHTTPPort.Name),
+		L1RPCUrl:            c.String(optionL1RPCUrl.Name),
+		SettlementRPCUrl:    c.String(optionSettlementRPCUrl.Name),
+		OracleContractAddr:  common.HexToAddress(c.String(optionOracleContractAddr.Name)),
+		PreconfContractAddr: common.HexToAddress(c.String(optionPreconfContractAddr.Name)),
+		PgHost:              c.String(optionPgHost.Name),
+		PgPort:              c.Int(optionPgPort.Name),
+		PgUser:              c.String(optionPgUser.Name),
+		PgPassword:          c.String(optionPgPassword.Name),
+		PgDbname:            c.String(optionPgDbname.Name),
+		LaggerdMode:         c.Int(optionLaggerdMode.Name),
+		OverrideWinners:     c.StringSlice(optionOverrideWinners.Name),
 	})
 	if err != nil {
 		return fmt.Errorf("failed starting node: %w", err)
@@ -183,39 +316,50 @@ func start(c *cli.Context) error {
 	return nil
 }
 
-func setupKeySigner(cfg *config) (keysigner.KeySigner, error) {
-	if cfg.PrivKeyFile == "" {
-		return setupKeystoreSigner(cfg)
+func setupKeySigner(c *cli.Context) (keysigner.KeySigner, error) {
+	if c.IsSet(optionKeystorePath.Name) {
+		return setupKeystoreSigner(c)
 	}
-	return setupPrivateKeySigner(cfg)
+	return setupPrivateKeySigner(c)
 }
 
-func setupKeystoreSigner(cfg *config) (keysigner.KeySigner, error) {
+func setupKeystoreSigner(c *cli.Context) (keysigner.KeySigner, error) {
 	// Load the keystore file
-	ks := keystore.NewKeyStore(cfg.KeystorePath, keystore.LightScryptN, keystore.LightScryptP)
-	accounts := ks.Accounts()
-	if len(accounts) == 0 {
-		return nil, fmt.Errorf("no accounts found in keystore, path: %s", cfg.KeystorePath)
+	ks := keystore.NewKeyStore(c.String(optionKeystorePath.Name), keystore.LightScryptN, keystore.LightScryptP)
+	password := c.String(optionKeystorePassword.Name)
+	ksAccounts := ks.Accounts()
+
+	var account accounts.Account
+	if len(ksAccounts) == 0 {
+		var err error
+		account, err = ks.NewAccount(password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create account: %w", err)
+		}
+	} else {
+		account = ksAccounts[0]
 	}
 
-	account := accounts[0]
-	return keysigner.NewKeystoreSigner(ks, cfg.KeystorePassword, account), nil
+	fmt.Fprintf(c.App.Writer, "Public address of the key: %s\n", account.Address.Hex())
+	fmt.Fprintf(c.App.Writer, "Path of the secret key file: %s\n", account.URL.Path)
+
+	return keysigner.NewKeystoreSigner(ks, password, account), nil
 }
 
-func setupPrivateKeySigner(cfg *config) (keysigner.KeySigner, error) {
-	privKeyFile := cfg.PrivKeyFile
-	if strings.HasPrefix(privKeyFile, "~/") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get user home directory: %w", err)
-		}
+func setupPrivateKeySigner(c *cli.Context) (keysigner.KeySigner, error) {
+	privKeyFile, err := resolveFilePath(c.String(optionPrivKeyFile.Name))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get private key file path: %w", err)
+	}
 
-		privKeyFile = filepath.Join(homeDir, privKeyFile[2:])
+	if err := createKeyIfNotExists(c, privKeyFile); err != nil {
+		return nil, fmt.Errorf("failed to create private key: %w", err)
 	}
 
 	privKey, err := crypto.LoadECDSA(privKeyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load private key from file '%s': %w", cfg.PrivKeyFile, err)
+		return nil, fmt.Errorf("failed to load private key from file '%s': %w", privKeyFile, err)
 	}
+
 	return keysigner.NewPrivateKeySigner(privKey), nil
 }

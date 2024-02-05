@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	rollupclient "github.com/primevprotocol/contracts-abi/clients/Oracle"
 	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
@@ -24,7 +22,6 @@ import (
 	"github.com/primevprotocol/mev-oracle/pkg/store"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/crypto/sha3"
 )
 
 type Options struct {

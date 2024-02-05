@@ -187,7 +187,7 @@ func main() {
 				Flags:  flags,
 				Before: altsrc.InitInputSourceWithContext(flags, altsrc.NewYamlSourceFromFlagFunc(optionConfig.Name)),
 				Action: func(c *cli.Context) error {
-					return start(c)
+					return initializeApplication(c)
 				},
 			},
 		}}
@@ -263,7 +263,27 @@ func getEthAddressFromPubKey(key *ecdsa.PublicKey) common.Address {
 	return common.BytesToAddress(address)
 }
 
-func start(c *cli.Context) error {
+func initializeApplication(c *cli.Context) error {
+	if err := verifyKeystorePasswordPresence(c); err != nil {
+		return err
+	}
+	if err := launchOracleWithConfig(c); err != nil {
+		return err
+	}
+	return nil
+}
+
+// verifyKeystorePasswordPresence checks for the presence of a keystore password.
+// it returns error, if keystore path is set and keystore password is not
+func verifyKeystorePasswordPresence(c *cli.Context) error {
+	if c.IsSet(optionKeystorePath.Name) && !c.IsSet(optionKeystorePassword.Name) {
+		return cli.Exit("Password for encrypted keystore is missing", 1)
+	}
+	return nil
+}
+
+// launchOracleWithConfig configures and starts the oracle based on the CLI context or config.yaml file.
+func launchOracleWithConfig(c *cli.Context) error {
 	keySigner, err := setupKeySigner(c)
 	if err != nil {
 		return fmt.Errorf("failed to setup key signer: %w", err)

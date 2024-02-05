@@ -235,15 +235,6 @@ func initDB(opts *Options) (db *sql.DB, err error) {
 	return db, err
 }
 
-func getEthAddressFromPubKey(key *ecdsa.PublicKey) common.Address {
-	pbBytes := crypto.FromECDSAPub(key)
-	hash := sha3.NewLegacyKeccak256()
-	hash.Write(pbBytes[1:])
-	address := hash.Sum(nil)[12:]
-
-	return common.BytesToAddress(address)
-}
-
 type laggerdL1Client struct {
 	l1Listener.EthClient
 	amount int

@@ -1,8 +1,10 @@
 package settler
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -245,18 +247,26 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 							settlement.Type == SettlementTypeSlash,
 						)
 						if err != nil {
-							return err
+							return fmt.Errorf("process commitment: %w", err)
 						}
 						commitmentIndexes = [][]byte{commitmentIdx[:]}
 					case SettlementTypeReturn:
+						for _, idx := range returns {
+							if bytes.Compare(idx[:], commitmentIdx[:]) == 0 {
+								return nil
+							}
+						}
 						returns = append(returns, commitmentIdx)
 						if len(returns) == batchSize {
+							log.Info().
+								Int("size", len(returns)).
+								Msg("batching returns")
 							commitmentPostingTxn, err = s.rollupClient.UnlockFunds(
 								opts,
 								returns,
 							)
 							if err != nil {
-								return err
+								return fmt.Errorf("unlock funds: %w", err)
 							}
 							for _, idx := range returns {
 								commitmentIndexes = append(commitmentIndexes, idx[:])
@@ -279,7 +289,7 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 						commitmentPostingTxn.Nonce(),
 					)
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to mark settlement initiated: %w", err)
 					}
 
 					s.metrics.LastUsedNonce.Set(float64(commitmentPostingTxn.Nonce()))

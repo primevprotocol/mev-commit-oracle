@@ -68,10 +68,9 @@ var (
 	})
 
 	optionL1RPCUrl = altsrc.NewStringFlag(&cli.StringFlag{
-		Name:     "l1-rpc-url",
-		Usage:    "URL for L1 RPC",
-		EnvVars:  []string{"MEV_ORACLE_L1_RPC_URL"},
-		Required: true,
+		Name:    "l1-rpc-url",
+		Usage:   "URL for L1 RPC",
+		EnvVars: []string{"MEV_ORACLE_L1_RPC_URL"},
 	})
 
 	optionSettlementRPCUrl = altsrc.NewStringFlag(&cli.StringFlag{

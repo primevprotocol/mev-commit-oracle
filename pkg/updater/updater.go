@@ -123,7 +123,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 
 					txnsInBlock := make(map[string]int)
 					for posInBlock, tx := range blk.Transactions() {
-						txnsInBlock[tx.Hash().Hex()] = posInBlock
+						txnsInBlock[tx.Hash().Hex()[2:]] = posInBlock
 					}
 
 					commitmentIndexes, err := u.preconfClient.GetCommitmentsByBlockNumber(

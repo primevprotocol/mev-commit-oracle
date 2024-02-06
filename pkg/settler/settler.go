@@ -252,7 +252,7 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 						commitmentIndexes = [][]byte{commitmentIdx[:]}
 					case SettlementTypeReturn:
 						for _, idx := range returns {
-							if bytes.Compare(idx[:], commitmentIdx[:]) == 0 {
+							if bytes.Equal(idx[:], commitmentIdx[:]) {
 								return nil
 							}
 						}

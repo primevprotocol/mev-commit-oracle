@@ -1,6 +1,7 @@
 package l1Listener
 
 import (
+	"bytes"
 	"context"
 	"math/big"
 	"time"
@@ -75,7 +76,7 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 					continue
 				}
 
-				winner := string(header.Extra)
+				winner := string(bytes.ToValidUTF8(header.Extra, []byte("�")))
 				if len(winner) == 0 {
 					log.Warn().
 						Int64("block", header.Number.Int64()).

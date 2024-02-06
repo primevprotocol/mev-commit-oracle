@@ -79,12 +79,12 @@ func TestUpdater(t *testing.T) {
 		if i%2 == 0 {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
 				Commiter: builderAddr,
-				TxnHash:  txn.Hash().Hex(),
+				TxnHash:  txn.Hash().Hex()[2:],
 			}
 		} else {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
 				Commiter: otherBuilderAddr,
-				TxnHash:  txn.Hash().Hex(),
+				TxnHash:  txn.Hash().Hex()[2:],
 			}
 		}
 	}
@@ -93,9 +93,9 @@ func TestUpdater(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		idxBytes := getIdxBytes(int64(i + 10))
 
-		bundle := txns[i].Hash().Hex()
+		bundle := txns[i].Hash().Hex()[2:]
 		for j := i + 1; j < 10; j++ {
-			bundle += "," + txns[j].Hash().Hex()
+			bundle += "," + txns[j].Hash().Hex()[2:]
 		}
 
 		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{

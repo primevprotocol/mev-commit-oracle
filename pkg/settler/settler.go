@@ -110,19 +110,19 @@ func (s *Settler) getTransactOpts(ctx context.Context) (*bind.TransactOpts, erro
 	}
 	auth.Nonce = big.NewInt(int64(nonce))
 
+	// Returns priority fee per gas
 	gasTip, err := s.client.SuggestGasTipCap(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	// Returns priority fee per gas + base fee per gas
 	gasPrice, err := s.client.SuggestGasPrice(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	gasFeeCap := new(big.Int).Add(gasTip, gasPrice)
-
-	auth.GasFeeCap = gasFeeCap
+	auth.GasFeeCap = gasPrice
 	auth.GasTipCap = gasTip
 
 	return auth, nil

@@ -1,11 +1,11 @@
 package settler
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -14,6 +14,7 @@ import (
 	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -35,13 +36,19 @@ type Settlement struct {
 	BlockNum      int64
 	Builder       string
 	Amount        uint64
+	BidID         []byte
 	Type          SettlementType
+}
+
+type Return struct {
+	BidIDs [][32]byte
 }
 
 type SettlerRegister interface {
 	LastNonce() (int64, error)
 	PendingTxnCount() (int, error)
 	SubscribeSettlements(ctx context.Context) <-chan Settlement
+	SubscribeReturns(ctx context.Context, limit int) <-chan Return
 	SettlementInitiated(ctx context.Context, commitmentIdx [][]byte, txHash common.Hash, nonce uint64) error
 	MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error)
 }
@@ -73,6 +80,7 @@ type Settler struct {
 	settlerRegister SettlerRegister
 	client          Transactor
 	metrics         *metrics
+	txMtx           sync.Mutex
 }
 
 func NewSettler(
@@ -134,183 +142,245 @@ func (s *Settler) Metrics() []prometheus.Collector {
 	return s.metrics.Collectors()
 }
 
+func (s *Settler) settlementUpdater(ctx context.Context) error {
+	queryTicker := time.NewTicker(500 * time.Millisecond)
+	defer queryTicker.Stop()
+
+	lastBlock := uint64(0)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-queryTicker.C:
+		}
+
+		currentBlock, err := s.client.BlockNumber(ctx)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to get block number")
+			continue
+		}
+
+		if currentBlock <= lastBlock {
+			continue
+		}
+
+		lastNonce, err := s.client.NonceAt(
+			ctx,
+			s.owner,
+			new(big.Int).SetUint64(currentBlock),
+		)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to get nonce")
+			continue
+		}
+
+		count, err := s.settlerRegister.MarkSettlementComplete(ctx, lastNonce)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to mark settlement complete")
+			continue
+		}
+
+		s.metrics.LastConfirmedNonce.Set(float64(lastNonce))
+		s.metrics.LastConfirmedBlock.Set(float64(currentBlock))
+		s.metrics.SettlementsConfirmedCount.Add(float64(count))
+
+		if count > 0 {
+			log.Info().Int("count", count).Msg("marked settlement complete")
+		}
+
+		lastBlock = currentBlock
+	}
+}
+
+func (s *Settler) settlementExecutor(ctx context.Context) error {
+RESTART:
+	cctx, unsub := context.WithCancel(ctx)
+	settlementChan := s.settlerRegister.SubscribeSettlements(cctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			unsub()
+			return ctx.Err()
+		case settlement, more := <-settlementChan:
+			if !more {
+				unsub()
+				goto RESTART
+			}
+
+			err := func() error {
+				s.txMtx.Lock()
+				defer s.txMtx.Unlock()
+
+				if settlement.Type == SettlementTypeReturn {
+					log.Warn().
+						Str("commitmentIdx", fmt.Sprintf("%x", settlement.CommitmentIdx)).
+						Msg("return settlement")
+					return nil
+				}
+
+				pendingTxns, err := s.settlerRegister.PendingTxnCount()
+				if err != nil {
+					return err
+				}
+
+				if pendingTxns > allowedPendingTxnCount {
+					return errors.New("too many pending txns")
+				}
+
+				var (
+					commitmentIdx [32]byte
+				)
+
+				opts, err := s.getTransactOpts(ctx)
+				if err != nil {
+					return err
+				}
+
+				copy(commitmentIdx[:], settlement.CommitmentIdx)
+
+				commitmentPostingTxn, err := s.rollupClient.ProcessBuilderCommitmentForBlockNumber(
+					opts,
+					commitmentIdx,
+					big.NewInt(settlement.BlockNum),
+					settlement.Builder,
+					settlement.Type == SettlementTypeSlash,
+				)
+				if err != nil {
+					return fmt.Errorf("process commitment: %w", err)
+				}
+
+				err = s.settlerRegister.SettlementInitiated(
+					ctx,
+					[][]byte{settlement.BidID},
+					commitmentPostingTxn.Hash(),
+					commitmentPostingTxn.Nonce(),
+				)
+				if err != nil {
+					return fmt.Errorf("failed to mark settlement initiated: %w", err)
+				}
+
+				s.metrics.LastUsedNonce.Set(float64(commitmentPostingTxn.Nonce()))
+				s.metrics.SettlementsPostedCount.Inc()
+				s.metrics.CurrentSettlementL1Block.Set(float64(settlement.BlockNum))
+
+				log.Info().
+					Int64("blockNum", settlement.BlockNum).
+					Str("txHash", commitmentPostingTxn.Hash().Hex()).
+					Str("builder", settlement.Builder).
+					Str("settlementType", string(settlement.Type)).
+					Msg("builder commitment processed")
+
+				return nil
+			}()
+			if err != nil {
+				log.Error().Err(err).Msg("failed to process builder commitment")
+				unsub()
+				time.Sleep(5 * time.Second)
+				goto RESTART
+			}
+		}
+	}
+}
+
+func (s *Settler) returnExecutor(ctx context.Context) error {
+RESTART:
+	cctx, unsub := context.WithCancel(ctx)
+	returnsChan := s.settlerRegister.SubscribeReturns(cctx, batchSize)
+
+	for {
+		select {
+		case <-ctx.Done():
+			unsub()
+			return ctx.Err()
+		case returns, more := <-returnsChan:
+			if !more {
+				unsub()
+				goto RESTART
+			}
+
+			err := func() error {
+				s.txMtx.Lock()
+				defer s.txMtx.Unlock()
+
+				pendingTxns, err := s.settlerRegister.PendingTxnCount()
+				if err != nil {
+					return err
+				}
+
+				if pendingTxns > allowedPendingTxnCount {
+					return errors.New("too many pending txns")
+				}
+
+				opts, err := s.getTransactOpts(ctx)
+				if err != nil {
+					return err
+				}
+
+				commitmentPostingTxn, err := s.rollupClient.UnlockFunds(
+					opts,
+					returns.BidIDs,
+				)
+				if err != nil {
+					return fmt.Errorf("process return: %w", err)
+				}
+
+				bidIDs := make([][]byte, 0, len(returns.BidIDs))
+				for _, bidID := range returns.BidIDs {
+					bidIDs = append(bidIDs, bidID[:])
+				}
+
+				err = s.settlerRegister.SettlementInitiated(
+					ctx,
+					bidIDs,
+					commitmentPostingTxn.Hash(),
+					commitmentPostingTxn.Nonce(),
+				)
+				if err != nil {
+					return fmt.Errorf("failed to mark settlement initiated: %w", err)
+				}
+
+				s.metrics.LastUsedNonce.Set(float64(commitmentPostingTxn.Nonce()))
+				s.metrics.SettlementsPostedCount.Inc()
+
+				log.Info().
+					Str("txHash", commitmentPostingTxn.Hash().Hex()).
+					Int("batchSize", len(returns.BidIDs)).
+					Msg("builder return processed")
+
+				return nil
+			}()
+			if err != nil {
+				log.Error().Err(err).Msg("failed to process return")
+				unsub()
+				time.Sleep(5 * time.Second)
+				goto RESTART
+			}
+		}
+	}
+}
+
 func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 	doneChan := make(chan struct{})
 
-	go func() {
-		queryTicker := time.NewTicker(500 * time.Millisecond)
-		defer queryTicker.Stop()
+	eg, egCtx := errgroup.WithContext(ctx)
 
-		lastBlock := uint64(0)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-queryTicker.C:
-			}
+	eg.Go(func() error {
+		return s.settlementUpdater(egCtx)
+	})
 
-			currentBlock, err := s.client.BlockNumber(ctx)
-			if err != nil {
-				log.Error().Err(err).Msg("failed to get block number")
-				continue
-			}
+	eg.Go(func() error {
+		return s.settlementExecutor(egCtx)
+	})
 
-			if currentBlock <= lastBlock {
-				continue
-			}
-
-			lastNonce, err := s.client.NonceAt(
-				ctx,
-				s.owner,
-				new(big.Int).SetUint64(currentBlock),
-			)
-			if err != nil {
-				log.Error().Err(err).Msg("failed to get nonce")
-				continue
-			}
-
-			count, err := s.settlerRegister.MarkSettlementComplete(ctx, lastNonce)
-			if err != nil {
-				log.Error().Err(err).Msg("failed to mark settlement complete")
-				continue
-			}
-
-			s.metrics.LastConfirmedNonce.Set(float64(lastNonce))
-			s.metrics.LastConfirmedBlock.Set(float64(currentBlock))
-			s.metrics.SettlementsConfirmedCount.Add(float64(count))
-
-			if count > 0 {
-				log.Info().Int("count", count).Msg("marked settlement complete")
-			}
-
-			lastBlock = currentBlock
-		}
-
-	}()
+	eg.Go(func() error {
+		return s.returnExecutor(egCtx)
+	})
 
 	go func() {
 		defer close(doneChan)
-
-	RESTART:
-		cctx, unsub := context.WithCancel(ctx)
-		settlementChan := s.settlerRegister.SubscribeSettlements(cctx)
-		returns := make([][32]byte, 0, batchSize)
-
-		for {
-			select {
-			case <-ctx.Done():
-				unsub()
-				return
-			case settlement, more := <-settlementChan:
-				if !more {
-					unsub()
-					goto RESTART
-				}
-
-				err := func() error {
-					pendingTxns, err := s.settlerRegister.PendingTxnCount()
-					if err != nil {
-						return err
-					}
-
-					if pendingTxns > allowedPendingTxnCount {
-						time.Sleep(5 * time.Second)
-						return errors.New("too many pending txns")
-					}
-
-					var (
-						commitmentIdx        [32]byte
-						commitmentIndexes    [][]byte
-						commitmentPostingTxn *types.Transaction
-						opts                 *bind.TransactOpts
-					)
-
-					// if we are batching returns, we don't want to post the txn until we have a full batch
-					if settlement.Type != SettlementTypeReturn || len(returns) == batchSize-1 {
-						opts, err = s.getTransactOpts(ctx)
-						if err != nil {
-							return err
-						}
-					}
-
-					copy(commitmentIdx[:], settlement.CommitmentIdx)
-
-					switch settlement.Type {
-					case SettlementTypeReward:
-						fallthrough
-					case SettlementTypeSlash:
-						commitmentPostingTxn, err = s.rollupClient.ProcessBuilderCommitmentForBlockNumber(
-							opts,
-							commitmentIdx,
-							big.NewInt(settlement.BlockNum),
-							settlement.Builder,
-							settlement.Type == SettlementTypeSlash,
-						)
-						if err != nil {
-							return fmt.Errorf("process commitment: %w", err)
-						}
-						commitmentIndexes = [][]byte{commitmentIdx[:]}
-					case SettlementTypeReturn:
-						for _, idx := range returns {
-							if bytes.Equal(idx[:], commitmentIdx[:]) {
-								return nil
-							}
-						}
-						returns = append(returns, commitmentIdx)
-						if len(returns) == batchSize {
-							log.Info().
-								Int("size", len(returns)).
-								Msg("batching returns")
-							commitmentPostingTxn, err = s.rollupClient.UnlockFunds(
-								opts,
-								returns,
-							)
-							if err != nil {
-								return fmt.Errorf("unlock funds: %w", err)
-							}
-							for _, idx := range returns {
-								commitmentIndexes = append(commitmentIndexes, idx[:])
-							}
-							// reset batch
-							returns = returns[:0]
-						}
-					}
-
-					if commitmentPostingTxn == nil {
-						// if we are batching returns, we don't want to post the txn
-						// until we have a full batch
-						return nil
-					}
-
-					err = s.settlerRegister.SettlementInitiated(
-						ctx,
-						commitmentIndexes,
-						commitmentPostingTxn.Hash(),
-						commitmentPostingTxn.Nonce(),
-					)
-					if err != nil {
-						return fmt.Errorf("failed to mark settlement initiated: %w", err)
-					}
-
-					s.metrics.LastUsedNonce.Set(float64(commitmentPostingTxn.Nonce()))
-					s.metrics.SettlementsPostedCount.Inc()
-					s.metrics.CurrentSettlementL1Block.Set(float64(settlement.BlockNum))
-
-					log.Info().
-						Int64("blockNum", settlement.BlockNum).
-						Str("txHash", commitmentPostingTxn.Hash().Hex()).
-						Str("builder", settlement.Builder).
-						Str("settlementType", string(settlement.Type)).
-						Msg("builder commitment processed")
-
-					return nil
-				}()
-				if err != nil {
-					log.Error().Err(err).Msg("failed to process builder commitment")
-					unsub()
-					goto RESTART
-				}
-			}
+		if err := eg.Wait(); err != nil {
+			log.Error().Err(err).Msg("settler error")
 		}
 	}()
 

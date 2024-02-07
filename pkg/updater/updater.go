@@ -31,6 +31,7 @@ type WinnerRegister interface {
 		blockNum int64,
 		amount uint64,
 		builder string,
+		bidID []byte,
 		settlementType settler.SettlementType,
 	) error
 }
@@ -169,6 +170,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 							winner.BlockNumber,
 							commitment.Bid,
 							winner.Winner,
+							commitment.CommitmentHash[:],
 							settlementType,
 						)
 						if err != nil {

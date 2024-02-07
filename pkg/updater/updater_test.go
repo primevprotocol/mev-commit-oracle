@@ -3,6 +3,7 @@ package updater_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"hash"
 	"math/big"
 	"strings"
@@ -79,13 +80,15 @@ func TestUpdater(t *testing.T) {
 
 		if i%2 == 0 {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-				Commiter: builderAddr,
-				TxnHash:  strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				Commiter:       builderAddr,
+				TxnHash:        strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
 			}
 		} else {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-				Commiter: otherBuilderAddr,
-				TxnHash:  strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				Commiter:       otherBuilderAddr,
+				TxnHash:        strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
 			}
 		}
 	}
@@ -100,8 +103,9 @@ func TestUpdater(t *testing.T) {
 		}
 
 		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-			Commiter: builderAddr,
-			TxnHash:  bundle,
+			Commiter:       builderAddr,
+			TxnHash:        bundle,
+			CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
 		}
 	}
 
@@ -324,6 +328,7 @@ func (t *testWinnerRegister) AddSettlement(
 	blockNum int64,
 	amount uint64,
 	builder string,
+	_ []byte,
 	settlementType settler.SettlementType,
 ) error {
 	t.settlements <- testSettlement{

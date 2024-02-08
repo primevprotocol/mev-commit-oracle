@@ -247,7 +247,7 @@ RESTART:
 					settlement.Type == SettlementTypeSlash,
 				)
 				if err != nil {
-					return fmt.Errorf("process commitment: %w", err)
+					return fmt.Errorf("process commitment: %w nonce %d", err, opts.Nonce.Uint64())
 				}
 
 				err = s.settlerRegister.SettlementInitiated(
@@ -269,6 +269,7 @@ RESTART:
 					Str("txHash", commitmentPostingTxn.Hash().Hex()).
 					Str("builder", settlement.Builder).
 					Str("settlementType", string(settlement.Type)).
+					Uint64("nonce", commitmentPostingTxn.Nonce()).
 					Msg("builder commitment processed")
 
 				return nil
@@ -322,7 +323,7 @@ RESTART:
 					returns.BidIDs,
 				)
 				if err != nil {
-					return fmt.Errorf("process return: %w", err)
+					return fmt.Errorf("process return: %w nonce %d", err, opts.Nonce.Uint64())
 				}
 
 				bidIDs := make([][]byte, 0, len(returns.BidIDs))
@@ -346,6 +347,7 @@ RESTART:
 				log.Info().
 					Str("txHash", commitmentPostingTxn.Hash().Hex()).
 					Int("batchSize", len(returns.BidIDs)).
+					Uint64("nonce", commitmentPostingTxn.Nonce()).
 					Msg("builder return processed")
 
 				return nil

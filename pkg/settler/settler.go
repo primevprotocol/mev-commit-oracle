@@ -335,6 +335,7 @@ RESTART:
 
 				log.Debug().
 					Stringer("bidIDs", returns).
+					Int("count", len(returns.BidIDs)).
 					Msg("processing return")
 
 				commitmentPostingTxn, err := s.rollupClient.UnlockFunds(

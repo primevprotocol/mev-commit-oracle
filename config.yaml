@@ -1,3 +1,4 @@
+keystore_path: /keystore
 log-level: debug
 l1-rpc-url: <L1_URL>
 settlement-rpc-url: http://sl-bootnode:8545

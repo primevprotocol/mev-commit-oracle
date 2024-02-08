@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -13,21 +12,20 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	rollupclient "github.com/primevprotocol/contracts-abi/clients/Oracle"
 	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
 	"github.com/primevprotocol/mev-oracle/pkg/apiserver"
+	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/primevprotocol/mev-oracle/pkg/l1Listener"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/primevprotocol/mev-oracle/pkg/store"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/crypto/sha3"
 )
 
 type Options struct {
-	PrivateKey          *ecdsa.PrivateKey
+	KeySigner           keysigner.KeySigner
 	HTTPPort            int
 	SettlementRPCUrl    string
 	L1RPCUrl            string
@@ -63,7 +61,7 @@ func NewNode(opts *Options) (*Node, error) {
 		return nil, err
 	}
 
-	owner := getEthAddressFromPubKey(opts.PrivateKey.Public().(*ecdsa.PublicKey))
+	owner := opts.KeySigner.GetAddress()
 
 	settlementClient, err := ethclient.Dial(opts.SettlementRPCUrl)
 	if err != nil {
@@ -114,7 +112,7 @@ func NewNode(opts *Options) (*Node, error) {
 		for _, winner := range opts.OverrideWinners {
 			err := setBuilderMapping(
 				ctx,
-				opts.PrivateKey,
+				opts.KeySigner,
 				chainID,
 				settlementClient,
 				oracleContract,
@@ -148,7 +146,7 @@ func NewNode(opts *Options) (*Node, error) {
 	updtrClosed := updtr.Start(ctx)
 
 	settlr := settler.NewSettler(
-		opts.PrivateKey,
+		opts.KeySigner,
 		chainID,
 		owner,
 		oracleContract,
@@ -234,15 +232,6 @@ func initDB(opts *Options) (db *sql.DB, err error) {
 	return db, err
 }
 
-func getEthAddressFromPubKey(key *ecdsa.PublicKey) common.Address {
-	pbBytes := crypto.FromECDSAPub(key)
-	hash := sha3.NewLegacyKeccak256()
-	hash.Write(pbBytes[1:])
-	address := hash.Sum(nil)[12:]
-
-	return common.BytesToAddress(address)
-}
-
 type laggerdL1Client struct {
 	l1Listener.EthClient
 	amount int
@@ -276,14 +265,14 @@ func (w *winnerOverrideL1Client) HeaderByNumber(ctx context.Context, number *big
 
 func setBuilderMapping(
 	ctx context.Context,
-	privateKey *ecdsa.PrivateKey,
+	keySigner keysigner.KeySigner,
 	chainID *big.Int,
 	client *ethclient.Client,
 	rc *rollupclient.Oracle,
 	builderName string,
 	builderAddress string,
 ) error {
-	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+	auth, err := keySigner.GetAuth(chainID)
 	if err != nil {
 		return err
 	}

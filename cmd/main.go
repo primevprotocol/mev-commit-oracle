@@ -8,9 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	contracts "github.com/primevprotocol/contracts-abi/config"
+	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/primevprotocol/mev-oracle/pkg/node"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -23,6 +26,7 @@ const (
 	defaultHTTPPort  = 8080
 	defaultConfigDir = "~/.mev-commit-oracle"
 	defaultKeyFile   = "key"
+	defaultKeystore  = "keystore"
 )
 
 var (
@@ -138,6 +142,19 @@ var (
 		Usage:   "Override winners for testing",
 		EnvVars: []string{"MEV_ORACLE_OVERRIDE_WINNERS"},
 	})
+
+	optionKeystorePassword = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "keystore-password",
+		Usage:   "use to access keystore",
+		EnvVars: []string{"MEV_COMMIT_KEYSTORE_PASSWORD"},
+	})
+
+	optionKeystorePath = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "keystore-path",
+		Usage:   "path to keystore location",
+		EnvVars: []string{"MEV_COMMIT_KEYSTORE_PATH"},
+		Value:   filepath.Join(defaultConfigDir, defaultKeystore),
+	})
 )
 
 func main() {
@@ -157,6 +174,8 @@ func main() {
 		optionPgDbname,
 		optionLaggerdMode,
 		optionOverrideWinners,
+		optionKeystorePath,
+		optionKeystorePassword,
 	}
 	app := &cli.App{
 		Name:  "mev-oracle",
@@ -168,7 +187,7 @@ func main() {
 				Flags:  flags,
 				Before: altsrc.InitInputSourceWithContext(flags, altsrc.NewYamlSourceFromFlagFunc(optionConfig.Name)),
 				Action: func(c *cli.Context) error {
-					return start(c)
+					return initializeApplication(c)
 				},
 			},
 		}}
@@ -244,14 +263,30 @@ func getEthAddressFromPubKey(key *ecdsa.PublicKey) common.Address {
 	return common.BytesToAddress(address)
 }
 
-func start(c *cli.Context) error {
-	privKeyFile, err := resolveFilePath(c.String(optionPrivKeyFile.Name))
-	if err != nil {
-		return fmt.Errorf("failed to get private key file path: %w", err)
+func initializeApplication(c *cli.Context) error {
+	if err := verifyKeystorePasswordPresence(c); err != nil {
+		return err
 	}
+	if err := launchOracleWithConfig(c); err != nil {
+		return err
+	}
+	return nil
+}
 
-	if err := createKeyIfNotExists(c, privKeyFile); err != nil {
-		return fmt.Errorf("failed to create private key: %w", err)
+// verifyKeystorePasswordPresence checks for the presence of a keystore password.
+// it returns error, if keystore path is set and keystore password is not
+func verifyKeystorePasswordPresence(c *cli.Context) error {
+	if c.IsSet(optionKeystorePath.Name) && !c.IsSet(optionKeystorePassword.Name) {
+		return cli.Exit("Password for encrypted keystore is missing", 1)
+	}
+	return nil
+}
+
+// launchOracleWithConfig configures and starts the oracle based on the CLI context or config.yaml file.
+func launchOracleWithConfig(c *cli.Context) error {
+	keySigner, err := setupKeySigner(c)
+	if err != nil {
+		return fmt.Errorf("failed to setup key signer: %w", err)
 	}
 
 	lvl, _ := zerolog.ParseLevel(c.String(optionLogLevel.Name))
@@ -260,13 +295,8 @@ func start(c *cli.Context) error {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(os.Stdout).With().Caller().Logger()
 
-	privKey, err := crypto.LoadECDSA(privKeyFile)
-	if err != nil {
-		return fmt.Errorf("failed to load private key from file '%s': %w", privKeyFile, err)
-	}
-
 	nd, err := node.NewNode(&node.Options{
-		PrivateKey:          privKey,
+		KeySigner:           keySigner,
 		HTTPPort:            c.Int(optionHTTPPort.Name),
 		L1RPCUrl:            c.String(optionL1RPCUrl.Name),
 		SettlementRPCUrl:    c.String(optionSettlementRPCUrl.Name),
@@ -304,4 +334,52 @@ func start(c *cli.Context) error {
 	}
 
 	return nil
+}
+
+func setupKeySigner(c *cli.Context) (keysigner.KeySigner, error) {
+	if c.IsSet(optionKeystorePath.Name) {
+		return setupKeystoreSigner(c)
+	}
+	return setupPrivateKeySigner(c)
+}
+
+func setupKeystoreSigner(c *cli.Context) (keysigner.KeySigner, error) {
+	// Load the keystore file
+	ks := keystore.NewKeyStore(c.String(optionKeystorePath.Name), keystore.LightScryptN, keystore.LightScryptP)
+	password := c.String(optionKeystorePassword.Name)
+	ksAccounts := ks.Accounts()
+
+	var account accounts.Account
+	if len(ksAccounts) == 0 {
+		var err error
+		account, err = ks.NewAccount(password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create account: %w", err)
+		}
+	} else {
+		account = ksAccounts[0]
+	}
+
+	fmt.Fprintf(c.App.Writer, "Public address of the key: %s\n", account.Address.Hex())
+	fmt.Fprintf(c.App.Writer, "Path of the secret key file: %s\n", account.URL.Path)
+
+	return keysigner.NewKeystoreSigner(ks, password, account), nil
+}
+
+func setupPrivateKeySigner(c *cli.Context) (keysigner.KeySigner, error) {
+	privKeyFile, err := resolveFilePath(c.String(optionPrivKeyFile.Name))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get private key file path: %w", err)
+	}
+
+	if err := createKeyIfNotExists(c, privKeyFile); err != nil {
+		return nil, fmt.Errorf("failed to create private key: %w", err)
+	}
+
+	privKey, err := crypto.LoadECDSA(privKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load private key from file '%s': %w", privKeyFile, err)
+	}
+
+	return keysigner.NewPrivateKeySigner(privKey), nil
 }

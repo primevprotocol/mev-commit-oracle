@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 )
 
@@ -183,6 +184,7 @@ func TestSettler(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	ks := keysigner.NewPrivateKeySigner(key)
 	ownerAddr := common.HexToAddress("0xabcd")
 
 	orcl := &testOracle{key: key}
@@ -192,7 +194,7 @@ func TestSettler(t *testing.T) {
 	transactor := &testTransactor{}
 
 	s := settler.NewSettler(
-		key,
+		ks,
 		big.NewInt(1000),
 		ownerAddr,
 		orcl,

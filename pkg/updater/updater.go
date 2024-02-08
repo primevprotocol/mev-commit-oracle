@@ -169,7 +169,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 							commitment.TxnHash,
 							winner.BlockNumber,
 							commitment.Bid,
-							winner.Winner,
+							commitment.Commiter.Hex(),
 							commitment.CommitmentHash[:],
 							settlementType,
 						)

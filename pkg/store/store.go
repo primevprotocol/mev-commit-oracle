@@ -421,7 +421,7 @@ func (s *Store) ProcessedBlocks(limit, offset int) ([]BlockInfo, error) {
 			SUM(settlements.amount) FILTER (WHERE settlements.type = 'reward') AS total_rewards,
 			COUNT(settlements.type = 'slash' OR NULL) AS slash_count,
 			SUM(settlements.amount) FILTER (WHERE settlements.type = 'slash') AS total_slashes,
-			COUNT(settlements.settled) AS settled_count
+			COUNT(settlements.settled) FILTER (WHERE settlements.settled = true) AS settled_count
 		FROM
 			winners
 		LEFT JOIN
@@ -478,7 +478,7 @@ func (s *Store) CommitmentStats() (CommitmentStats, error) {
 			COUNT(DISTINCT bid_id),
 			COUNT(type = 'reward' OR NULL),
 			COUNT(type = 'slash' OR NULL),
-			COUNT(settled)
+			COUNT(settled) FILTER (WHERE settled = true)
 		FROM
 			settlements
 	`).Scan(

@@ -453,7 +453,7 @@ func TestStore(t *testing.T) {
 			t.Fatalf("Expected no of bids 3, got %d", block.NoOfBids)
 		}
 		if block.TotalAmount != 4000000 {
-			t.Fatalf("Expected total amount 5000000, got %d", block.TotalAmount)
+			t.Fatalf("Expected total amount 4000000, got %d", block.TotalAmount)
 		}
 		if block.NoOfRewards != 1 {
 			t.Fatalf("Expected no of rewards 1, got %d", block.NoOfRewards)
@@ -462,10 +462,10 @@ func TestStore(t *testing.T) {
 			t.Fatalf("Expected total rewards 2000000, got %d", block.TotalRewards)
 		}
 		if block.NoOfSlashes != 1 {
-			t.Fatalf("Expected no of slashes 2, got %d", block.NoOfSlashes)
+			t.Fatalf("Expected no of slashes 1, got %d", block.NoOfSlashes)
 		}
 		if block.TotalSlashes != 1000000 {
-			t.Fatalf("Expected total slashes 2000000, got %d", block.TotalSlashes)
+			t.Fatalf("Expected total slashes 1000000, got %d", block.TotalSlashes)
 		}
 		if block.NoOfSettlements != 3 {
 			t.Fatalf("Expected no of settlements 3, got %d", block.NoOfSettlements)

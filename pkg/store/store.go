@@ -395,11 +395,11 @@ type BlockInfo struct {
 	Builder         string
 	NoOfCommitments int
 	NoOfBids        int
-	TotalAmount     int
+	TotalAmount     sql.NullString
 	NoOfRewards     int
-	TotalRewards    int
+	TotalRewards    sql.NullString
 	NoOfSlashes     int
-	TotalSlashes    int
+	TotalSlashes    sql.NullString
 	NoOfSettlements int
 }
 

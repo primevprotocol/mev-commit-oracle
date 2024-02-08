@@ -47,11 +47,11 @@ type Return struct {
 
 func (r Return) String() string {
 	strs := make([]string, len(r.BidIDs))
-	for _, bidID := range r.BidIDs {
-		strs = append(strs, fmt.Sprintf("%x", bidID))
+	for idx, bidID := range r.BidIDs {
+		strs[idx] = fmt.Sprintf("%x", bidID)
 	}
 
-	return strings.Join(strs, ",")
+	return fmt.Sprintf("[%s]", strings.Join(strs, ", "))
 }
 
 type SettlerRegister interface {
@@ -330,7 +330,9 @@ RESTART:
 
 				bidIDs := make([][]byte, 0, len(returns.BidIDs))
 				for _, bidID := range returns.BidIDs {
-					bidIDs = append(bidIDs, bidID[:])
+					b := make([]byte, 32)
+					copy(b, bidID[:])
+					bidIDs = append(bidIDs, b)
 				}
 
 				log.Debug().

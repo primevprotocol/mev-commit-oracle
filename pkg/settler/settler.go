@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +43,15 @@ type Settlement struct {
 
 type Return struct {
 	BidIDs [][32]byte
+}
+
+func (r Return) String() string {
+	strs := make([]string, len(r.BidIDs))
+	for _, bidID := range r.BidIDs {
+		strs = append(strs, fmt.Sprintf("%x", bidID))
+	}
+
+	return strings.Join(strs, ",")
 }
 
 type SettlerRegister interface {
@@ -318,17 +328,21 @@ RESTART:
 					return err
 				}
 
+				bidIDs := make([][]byte, 0, len(returns.BidIDs))
+				for _, bidID := range returns.BidIDs {
+					bidIDs = append(bidIDs, bidID[:])
+				}
+
+				log.Debug().
+					Stringer("bidIDs", returns).
+					Msg("processing return")
+
 				commitmentPostingTxn, err := s.rollupClient.UnlockFunds(
 					opts,
 					returns.BidIDs,
 				)
 				if err != nil {
 					return fmt.Errorf("process return: %w nonce %d", err, opts.Nonce.Uint64())
-				}
-
-				bidIDs := make([][]byte, 0, len(returns.BidIDs))
-				for _, bidID := range returns.BidIDs {
-					bidIDs = append(bidIDs, bidID[:])
 				}
 
 				err = s.settlerRegister.SettlementInitiated(

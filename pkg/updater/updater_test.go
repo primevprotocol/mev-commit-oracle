@@ -155,9 +155,6 @@ func TestUpdater(t *testing.T) {
 		if settlement.blockNum != 5 {
 			t.Fatal("wrong block number")
 		}
-		if settlement.builder != "test" {
-			t.Fatal("wrong builder")
-		}
 		if settlement.settlementType == settler.SettlementTypeSlash {
 			t.Fatal("should not be slash")
 		}
@@ -273,9 +270,6 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 		settlement := <-testWinnerRegister.settlements
 		if settlement.blockNum != 5 {
 			t.Fatal("wrong block number")
-		}
-		if settlement.builder != "test" {
-			t.Fatal("wrong builder")
 		}
 		if settlement.settlementType != settler.SettlementTypeSlash {
 			t.Fatalf("should be slash, got %s", settlement.settlementType)

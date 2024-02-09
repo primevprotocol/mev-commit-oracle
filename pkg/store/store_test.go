@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -83,6 +84,7 @@ func TestStore(t *testing.T) {
 			BlockNum:      1,
 			Amount:        2000000,
 			Builder:       winners[0].Winner,
+			BidID:         common.HexToHash("0x01").Bytes(),
 			Type:          settler.SettlementTypeReward,
 		},
 		{
@@ -91,6 +93,7 @@ func TestStore(t *testing.T) {
 			BlockNum:      1,
 			Amount:        1000000,
 			Builder:       winners[0].Winner,
+			BidID:         common.HexToHash("0x02").Bytes(),
 			Type:          settler.SettlementTypeSlash,
 		},
 		{
@@ -99,6 +102,7 @@ func TestStore(t *testing.T) {
 			BlockNum:      1,
 			Amount:        1000000,
 			Builder:       winners[1].Winner,
+			BidID:         common.HexToHash("0x03").Bytes(),
 			Type:          settler.SettlementTypeReturn,
 		},
 		{
@@ -107,6 +111,7 @@ func TestStore(t *testing.T) {
 			BlockNum:      2,
 			Amount:        2000000,
 			Builder:       winners[1].Winner,
+			BidID:         common.HexToHash("0x04").Bytes(),
 			Type:          settler.SettlementTypeReward,
 		},
 		{
@@ -115,6 +120,7 @@ func TestStore(t *testing.T) {
 			BlockNum:      2,
 			Amount:        1000000,
 			Builder:       winners[1].Winner,
+			BidID:         common.HexToHash("0x05").Bytes(),
 			Type:          settler.SettlementTypeSlash,
 		},
 		{
@@ -123,6 +129,7 @@ func TestStore(t *testing.T) {
 			BlockNum:      2,
 			Amount:        1000000,
 			Builder:       winners[0].Winner,
+			BidID:         common.HexToHash("0x04").Bytes(),
 			Type:          settler.SettlementTypeReturn,
 		},
 	}
@@ -159,9 +166,6 @@ func TestStore(t *testing.T) {
 
 		// Subscribe to winners
 		winnerChan := st.SubscribeWinners(ctx)
-		if err != nil {
-			t.Fatalf("Failed to subscribe to winners: %s", err)
-		}
 
 		for i := 0; i < 2; i++ {
 			winner := <-winnerChan
@@ -196,9 +200,6 @@ func TestStore(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		winnerChan := st.SubscribeWinners(ctx)
-		if err != nil {
-			t.Fatalf("Failed to subscribe to winners: %s", err)
-		}
 
 		winner := <-winnerChan
 		if winner.BlockNumber != winners[1].BlockNumber {
@@ -230,6 +231,7 @@ func TestStore(t *testing.T) {
 				settlement.BlockNum,
 				settlement.Amount,
 				settlement.Builder,
+				settlement.BidID,
 				settlement.Type,
 			)
 			if err != nil {
@@ -247,11 +249,8 @@ func TestStore(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		settlementChan := st.SubscribeSettlements(ctx)
-		if err != nil {
-			t.Fatalf("Failed to subscribe to settlements: %s", err)
-		}
 
-		for i := 0; i < 6; i++ {
+		for _, i := range []int{0, 1, 3, 4} {
 			settlement := <-settlementChan
 			if diff := cmp.Diff(settlement, settlements[i]); diff != "" {
 				t.Fatalf("Unexpected settlement: (-want +have):\n%s", diff)
@@ -272,10 +271,11 @@ func TestStore(t *testing.T) {
 			t.Fatalf("Failed to create store: %s", err)
 		}
 
+		settlementIdxs := []int{0, 1, 3, 4}
 		indexes := make([][]byte, 2)
-		for i := 0; i < 3; i++ {
-			indexes[0] = settlements[2*i].CommitmentIdx
-			indexes[1] = settlements[2*i+1].CommitmentIdx
+		for i := 0; i < 2; i++ {
+			indexes[0] = settlements[settlementIdxs[2*i]].BidID
+			indexes[1] = settlements[settlementIdxs[2*i+1]].BidID
 
 			err = st.SettlementInitiated(
 				context.Background(),
@@ -299,16 +299,16 @@ func TestStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to get last nonce: %s", err)
 		}
-		if lastNonce != 3 {
-			t.Fatalf("Expected last nonce 3, got %d", lastNonce)
+		if lastNonce != 2 {
+			t.Fatalf("Expected last nonce 2, got %d", lastNonce)
 		}
 
 		pendingTxnCount, err := st.PendingTxnCount()
 		if err != nil {
 			t.Fatalf("Failed to get pending txn count: %s", err)
 		}
-		if pendingTxnCount != 3 {
-			t.Fatalf("Expected pending txn count 3, got %d", pendingTxnCount)
+		if pendingTxnCount != 2 {
+			t.Fatalf("Expected pending txn count 2, got %d", pendingTxnCount)
 		}
 	})
 
@@ -318,15 +318,86 @@ func TestStore(t *testing.T) {
 			t.Fatalf("Failed to create store: %s", err)
 		}
 
+		count, err := st.MarkSettlementComplete(context.Background(), 3)
+		if err != nil {
+			t.Fatalf("Failed to mark settlement complete: %s", err)
+		}
+		if count != 5 {
+			t.Fatalf("Expected count 5, got %d", count)
+		}
+
+		pendingTxnCount, err := st.PendingTxnCount()
+		if err != nil {
+			t.Fatalf("Failed to get pending txn count: %s", err)
+		}
+		if pendingTxnCount != 0 {
+			t.Fatalf("Expected pending txn count 0, got %d", pendingTxnCount)
+		}
+	})
+
+	t.Run("SubscribeReturns", func(t *testing.T) {
+		st, err := store.NewStore(db)
+		if err != nil {
+			t.Fatalf("Failed to create store: %s", err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		returnChan := st.SubscribeReturns(ctx, 2)
+
+		returnSettlement := <-returnChan
+		if len(returnSettlement.BidIDs) != 1 {
+			t.Fatalf("Expected 1 bid ID, got %d", len(returnSettlement.BidIDs))
+		}
+		if !bytes.Equal(returnSettlement.BidIDs[0][:], settlements[2].BidID) {
+			t.Fatalf(
+				"Unexpected return settlement: want %x have %x\n",
+				settlements[2].BidID,
+				returnSettlement.BidIDs[0],
+			)
+		}
+
+		cancel()
+
+		returnSettlement, ok := <-returnChan
+		if ok {
+			t.Fatalf("Expected channel to be closed, got %v", returnSettlement)
+		}
+	})
+
+	t.Run("SettleReturn", func(t *testing.T) {
+		st, err := store.NewStore(db)
+		if err != nil {
+			t.Fatalf("Failed to create store: %s", err)
+		}
+
+		err = st.SettlementInitiated(
+			context.Background(),
+			[][]byte{settlements[2].BidID},
+			common.HexToHash(fmt.Sprintf("0x%02d", 3)),
+			uint64(3),
+		)
+		if err != nil {
+			t.Fatalf("Failed to initiate settlement: %s", err)
+		}
+
+		pendingTxnCount, err := st.PendingTxnCount()
+		if err != nil {
+			t.Fatalf("Failed to get pending txn count: %s", err)
+		}
+		if pendingTxnCount != 1 {
+			t.Fatalf("Expected pending txn count 1, got %d", pendingTxnCount)
+		}
+
 		count, err := st.MarkSettlementComplete(context.Background(), 4)
 		if err != nil {
 			t.Fatalf("Failed to mark settlement complete: %s", err)
 		}
-		if count != 6 {
-			t.Fatalf("Expected count 6, got %d", count)
+		if count != 1 {
+			t.Fatalf("Expected count 1, got %d", count)
 		}
 
-		pendingTxnCount, err := st.PendingTxnCount()
+		pendingTxnCount, err = st.PendingTxnCount()
 		if err != nil {
 			t.Fatalf("Failed to get pending txn count: %s", err)
 		}
@@ -347,6 +418,9 @@ func TestStore(t *testing.T) {
 		}
 		if stats.TotalCount != 6 {
 			t.Fatalf("Expected total count 6, got %d", stats.TotalCount)
+		}
+		if stats.BidCount != 5 {
+			t.Fatalf("Expected bid count 5, got %d", stats.BidCount)
 		}
 		if stats.RewardCount != 2 {
 			t.Fatalf("Expected reward count 2, got %d", stats.RewardCount)
@@ -375,20 +449,23 @@ func TestStore(t *testing.T) {
 		if block.NoOfCommitments != 3 {
 			t.Fatalf("Expected no of commitments 3, got %d", block.NoOfCommitments)
 		}
-		if block.TotalAmount != 4000000 {
-			t.Fatalf("Expected total amount 5000000, got %d", block.TotalAmount)
+		if block.NoOfBids != 3 {
+			t.Fatalf("Expected no of bids 3, got %d", block.NoOfBids)
+		}
+		if block.TotalAmount.String != "4000000" {
+			t.Fatalf("Expected total amount 4000000, got %s", block.TotalAmount.String)
 		}
 		if block.NoOfRewards != 1 {
 			t.Fatalf("Expected no of rewards 1, got %d", block.NoOfRewards)
 		}
-		if block.TotalRewards != 2000000 {
-			t.Fatalf("Expected total rewards 2000000, got %d", block.TotalRewards)
+		if block.TotalRewards.String != "2000000" {
+			t.Fatalf("Expected total rewards 2000000, got %s", block.TotalRewards.String)
 		}
 		if block.NoOfSlashes != 1 {
-			t.Fatalf("Expected no of slashes 2, got %d", block.NoOfSlashes)
+			t.Fatalf("Expected no of slashes 1, got %d", block.NoOfSlashes)
 		}
-		if block.TotalSlashes != 1000000 {
-			t.Fatalf("Expected total slashes 2000000, got %d", block.TotalSlashes)
+		if block.TotalSlashes.String != "1000000" {
+			t.Fatalf("Expected total slashes 1000000, got %s", block.TotalSlashes.String)
 		}
 		if block.NoOfSettlements != 3 {
 			t.Fatalf("Expected no of settlements 3, got %d", block.NoOfSettlements)

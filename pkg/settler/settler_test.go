@@ -22,6 +22,7 @@ type testRegister struct {
 	currentNonce         atomic.Int64
 	pendingTxns          atomic.Int32
 	settlementChan       chan settler.Settlement
+	returnsChan          chan settler.Return
 	mu                   sync.Mutex
 	settlementsInitiated [][]byte
 	settlementsCompleted atomic.Int32
@@ -49,6 +50,22 @@ func (t *testRegister) SubscribeSettlements(ctx context.Context) <-chan settler.
 	}()
 
 	return sc
+}
+
+func (t *testRegister) SubscribeReturns(ctx context.Context, _ int) <-chan settler.Return {
+	rc := make(chan settler.Return)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case r := <-t.returnsChan:
+				rc <- r
+			}
+		}
+	}()
+
+	return rc
 }
 
 func (t *testRegister) SettlementInitiated(ctx context.Context, commitmentIdx [][]byte, txHash common.Hash, nonce uint64) error {
@@ -190,6 +207,7 @@ func TestSettler(t *testing.T) {
 	orcl := &testOracle{key: key}
 	reg := &testRegister{
 		settlementChan: make(chan settler.Settlement),
+		returnsChan:    make(chan settler.Return),
 	}
 	transactor := &testTransactor{}
 
@@ -219,6 +237,7 @@ func TestSettler(t *testing.T) {
 			BlockNum:      100,
 			Builder:       "0x1234",
 			Amount:        1000,
+			BidID:         common.HexToHash(fmt.Sprintf("0x%02d", i)).Bytes(),
 			Type:          sType,
 		}
 
@@ -254,16 +273,12 @@ func TestSettler(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	returns := settler.Return{}
+
 	for i := 0; i < 10; i++ {
-		reg.settlementChan <- settler.Settlement{
-			CommitmentIdx: big.NewInt(int64(i + 1)).Bytes(),
-			TxHash:        "0x1234",
-			BlockNum:      100,
-			Builder:       "0x1234",
-			Amount:        1000,
-			Type:          settler.SettlementTypeReturn,
-		}
+		returns.BidIDs = append(returns.BidIDs, common.HexToHash(fmt.Sprintf("0x%02d", i)))
 	}
+	reg.returnsChan <- returns
 
 	if err := waitForCount(5*time.Second, 20, reg.settlementsInitiatedCount); err != nil {
 		t.Fatal(err)

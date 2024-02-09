@@ -1,18 +1,17 @@
-priv_key_file: /key
-keystore_path: /keystore
-keystore_password: primev
-log_level: debug
-l1_rpc_url: <L1_URL>
-settlement_rpc_url: http://sl-bootnode:8545
-oracle_contract_addr: 0xF82E60097df8A1c2c58dC95ce08fe00F30717beB
-preconf_contract_addr: 0x451656c1E7eDf82397EBE04f38819c9970AA3658
-pg_host: oracle-db
-pg_port: 5432
-pg_user: oracle_user
-pg_password: oracle_pass
-pg_dbname: oracle_db
-laggerd_mode: 10
-override_winners:
+priv-key-file: /key
+keystore-path: /keystore
+keystore-password: primev
+log-level: debug
+l1-rpc-url: <L1_URL>
+settlement-rpc-url: http://sl-bootnode:8545
+pg-host: oracle-db
+pg-port: 5432
+pg-user: oracle_user
+pg-password: oracle_pass
+pg-dbname: oracle_db
+laggerd-mode: 10
+override-winners:
   - 0x48ddC642514370bdaFAd81C91e23759B0302C915
   - 0x972eb4Fc3c457da4C957306bE7Fa1976BB8F39A6
   - 0xA1e8FDB3bb6A0DB7aA5Db49a3512B01671686DCB
+  - 0xdeadbeef00000000000000000000000000000000

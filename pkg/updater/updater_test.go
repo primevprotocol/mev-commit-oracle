@@ -3,8 +3,10 @@ package updater_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"hash"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,13 +80,15 @@ func TestUpdater(t *testing.T) {
 
 		if i%2 == 0 {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-				Commiter: builderAddr,
-				TxnHash:  txn.Hash().Hex(),
+				Commiter:       builderAddr,
+				TxnHash:        strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
 			}
 		} else {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-				Commiter: otherBuilderAddr,
-				TxnHash:  txn.Hash().Hex(),
+				Commiter:       otherBuilderAddr,
+				TxnHash:        strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
 			}
 		}
 	}
@@ -93,14 +97,15 @@ func TestUpdater(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		idxBytes := getIdxBytes(int64(i + 10))
 
-		bundle := txns[i].Hash().Hex()
+		bundle := strings.TrimPrefix(txns[i].Hash().Hex(), "0x")
 		for j := i + 1; j < 10; j++ {
-			bundle += "," + txns[j].Hash().Hex()
+			bundle += "," + strings.TrimPrefix(txns[j].Hash().Hex(), "0x")
 		}
 
 		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-			Commiter: builderAddr,
-			TxnHash:  bundle,
+			Commiter:       builderAddr,
+			TxnHash:        bundle,
+			CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
 		}
 	}
 
@@ -149,9 +154,6 @@ func TestUpdater(t *testing.T) {
 		settlement := <-testWinnerRegister.settlements
 		if settlement.blockNum != 5 {
 			t.Fatal("wrong block number")
-		}
-		if settlement.builder != "test" {
-			t.Fatal("wrong builder")
 		}
 		if settlement.settlementType == settler.SettlementTypeSlash {
 			t.Fatal("should not be slash")
@@ -269,9 +271,6 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 		if settlement.blockNum != 5 {
 			t.Fatal("wrong block number")
 		}
-		if settlement.builder != "test" {
-			t.Fatal("wrong builder")
-		}
 		if settlement.settlementType != settler.SettlementTypeSlash {
 			t.Fatalf("should be slash, got %s", settlement.settlementType)
 		}
@@ -323,6 +322,7 @@ func (t *testWinnerRegister) AddSettlement(
 	blockNum int64,
 	amount uint64,
 	builder string,
+	_ []byte,
 	settlementType settler.SettlementType,
 ) error {
 	t.settlements <- testSettlement{

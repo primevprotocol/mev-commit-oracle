@@ -31,6 +31,7 @@ type WinnerRegister interface {
 		blockNum int64,
 		amount uint64,
 		builder string,
+		bidID []byte,
 		settlementType settler.SettlementType,
 	) error
 }
@@ -123,7 +124,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 
 					txnsInBlock := make(map[string]int)
 					for posInBlock, tx := range blk.Transactions() {
-						txnsInBlock[tx.Hash().Hex()] = posInBlock
+						txnsInBlock[strings.TrimPrefix(tx.Hash().Hex(), "0x")] = posInBlock
 					}
 
 					commitmentIndexes, err := u.preconfClient.GetCommitmentsByBlockNumber(
@@ -168,7 +169,8 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 							commitment.TxnHash,
 							winner.BlockNumber,
 							commitment.Bid,
-							winner.Winner,
+							commitment.Commiter.Hex(),
+							commitment.CommitmentHash[:],
 							settlementType,
 						)
 						if err != nil {

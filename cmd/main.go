@@ -145,13 +145,13 @@ var (
 	optionKeystorePassword = altsrc.NewStringFlag(&cli.StringFlag{
 		Name:    "keystore-password",
 		Usage:   "use to access keystore",
-		EnvVars: []string{"MEV_COMMIT_KEYSTORE_PASSWORD"},
+		EnvVars: []string{"MEV_ORACLE_KEYSTORE_PASSWORD"},
 	})
 
 	optionKeystorePath = altsrc.NewStringFlag(&cli.StringFlag{
 		Name:    "keystore-path",
 		Usage:   "path to keystore location",
-		EnvVars: []string{"MEV_COMMIT_KEYSTORE_PATH"},
+		EnvVars: []string{"MEV_ORACLE_KEYSTORE_PATH"},
 		Value:   filepath.Join(defaultConfigDir, defaultKeystore),
 	})
 )

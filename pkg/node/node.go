@@ -292,19 +292,20 @@ func setBuilderMapping(
 		return err
 	}
 	auth.Nonce = big.NewInt(int64(nonce))
+
+	// Returns priority fee per gas
 	gasTip, err := client.SuggestGasTipCap(ctx)
 	if err != nil {
 		return err
 	}
 
+	// Returns priority fee per gas + base fee per gas
 	gasPrice, err := client.SuggestGasPrice(ctx)
 	if err != nil {
 		return err
 	}
 
-	gasFeeCap := new(big.Int).Add(gasTip, gasPrice)
-
-	auth.GasFeeCap = gasFeeCap
+	auth.GasFeeCap = gasPrice
 	auth.GasTipCap = gasTip
 
 	txn, err := rc.AddBuilderAddress(auth, builderName, common.HexToAddress(builderAddress))

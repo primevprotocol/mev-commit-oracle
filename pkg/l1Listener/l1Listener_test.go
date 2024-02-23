@@ -25,7 +25,7 @@ func TestL1Listener(t *testing.T) {
 		errC:    make(chan error, 1),
 	}
 
-	l := l1Listener.NewL1Listener(ethClient, reg)
+	l := l1Listener.NewL1Listener(ethClient, reg, true)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cl := l1Listener.SetCheckInterval(100 * time.Millisecond)

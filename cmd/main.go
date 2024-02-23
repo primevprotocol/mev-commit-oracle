@@ -154,6 +154,13 @@ var (
 		EnvVars: []string{"MEV_ORACLE_KEYSTORE_PATH"},
 		Value:   filepath.Join(defaultConfigDir, defaultKeystore),
 	})
+
+	optionWaitOnFinality = altsrc.NewBoolFlag(&cli.BoolFlag{
+		Name:    "wait-on-finality",
+		Usage:   "wait for finality before sending settlement",
+		EnvVars: []string{"MEV_ORACLE_WAIT_ON_FINALITY"},
+		Value:   true,
+	})
 )
 
 func main() {
@@ -175,6 +182,7 @@ func main() {
 		optionOverrideWinners,
 		optionKeystorePath,
 		optionKeystorePassword,
+		optionWaitOnFinality,
 	}
 	app := &cli.App{
 		Name:  "mev-oracle",
@@ -308,6 +316,7 @@ func launchOracleWithConfig(c *cli.Context) error {
 		PgDbname:            c.String(optionPgDbname.Name),
 		LaggerdMode:         c.Int(optionLaggerdMode.Name),
 		OverrideWinners:     c.StringSlice(optionOverrideWinners.Name),
+		WaitOnFinality:      c.Bool(optionWaitOnFinality.Name),
 	})
 	if err != nil {
 		return fmt.Errorf("failed starting node: %w", err)

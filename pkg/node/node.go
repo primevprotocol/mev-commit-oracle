@@ -38,6 +38,7 @@ type Options struct {
 	PgDbname            string
 	LaggerdMode         int
 	OverrideWinners     []string
+	WaitOnFinality      bool
 }
 
 type Node struct {
@@ -127,7 +128,7 @@ func NewNode(opts *Options) (*Node, error) {
 		}
 	}
 
-	l1Lis := l1Listener.NewL1Listener(listenerL1Client, st)
+	l1Lis := l1Listener.NewL1Listener(listenerL1Client, st, opts.WaitOnFinality)
 	l1LisClosed := l1Lis.Start(ctx)
 
 	callOpts := bind.CallOpts{

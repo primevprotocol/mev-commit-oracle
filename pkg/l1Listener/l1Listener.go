@@ -26,16 +26,19 @@ type L1Listener struct {
 	l1Client       EthClient
 	winnerRegister WinnerRegister
 	metrics        *metrics
+	waitOnFinality bool
 }
 
 func NewL1Listener(
 	l1Client EthClient,
 	winnerRegister WinnerRegister,
+	waitOnFinality bool,
 ) *L1Listener {
 	return &L1Listener{
 		l1Client:       l1Client,
 		winnerRegister: winnerRegister,
 		metrics:        newMetrics(),
+		waitOnFinality: waitOnFinality,
 	}
 }
 
@@ -63,7 +66,11 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 					log.Error().Err(err).Msg("failed to get block number")
 					continue
 				}
-
+				if l.waitOnFinality && blockNum > 64 {
+					// This is a weak proxy for finaility to limit exposure to reorgs
+					// TODO(@ckartik): Interact with Finality gadget to give a more robust implementation.
+					blockNum -= 64
+				}
 				if blockNum <= uint64(currentBlockNo) {
 					continue
 				}

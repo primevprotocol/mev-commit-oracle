@@ -6,12 +6,13 @@ require (
 	github.com/ethereum/go-ethereum v1.13.5
 	github.com/google/go-cmp v0.6.0
 	github.com/lib/pq v1.10.9
-	github.com/primevprotocol/contracts-abi v0.1.3-rc1
+	github.com/primevprotocol/contracts-abi v0.2.0
 	github.com/prometheus/client_golang v1.14.0
 	github.com/rs/zerolog v1.31.0
 	github.com/testcontainers/testcontainers-go v0.27.0
 	github.com/urfave/cli/v2 v2.27.1
 	golang.org/x/crypto v0.18.0
+	golang.org/x/sync v0.6.0
 )
 
 require (
@@ -86,7 +87,6 @@ require (
 	golang.org/x/exp v0.0.0-20240119083558-1b970713d09a // indirect
 	golang.org/x/mod v0.14.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
-	golang.org/x/sync v0.6.0 // indirect
 	golang.org/x/sys v0.16.0 // indirect
 	golang.org/x/time v0.4.0 // indirect
 	golang.org/x/tools v0.17.0 // indirect

@@ -22,6 +22,8 @@ type BlockWinner struct {
 }
 
 type WinnerRegister interface {
+	// Need to delay subscribe winners somehow?
+	// This could be a brittle way to do it
 	SubscribeWinners(ctx context.Context) <-chan BlockWinner
 	UpdateComplete(ctx context.Context, blockNum int64) error
 	AddSettlement(
@@ -36,7 +38,7 @@ type WinnerRegister interface {
 	) error
 }
 
-type L1Client interface {
+type EVMClient interface {
 	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
 }
 
@@ -51,7 +53,8 @@ type Preconf interface {
 
 type Updater struct {
 	logger               *slog.Logger
-	l1Client             L1Client
+	l1Client             EVMClient
+	l2Client             EVMClient
 	winnerRegister       WinnerRegister
 	preconfClient        Preconf
 	rollupClient         Oracle
@@ -61,7 +64,7 @@ type Updater struct {
 
 func NewUpdater(
 	logger *slog.Logger,
-	l1Client L1Client,
+	l1Client EVMClient,
 	winnerRegister WinnerRegister,
 	rollupClient Oracle,
 	preconfClient Preconf,

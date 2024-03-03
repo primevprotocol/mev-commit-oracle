@@ -105,6 +105,7 @@ func (t *testOracle) ProcessBuilderCommitmentForBlockNumber(
 	blockNum *big.Int,
 	builder string,
 	isSlash bool,
+	residualDecay *big.Int,
 ) (*types.Transaction, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -20,6 +20,10 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;`
 
+// TODO(@ckartik): Add table for L2 blocks to logically compute ms timestamps
+// Now that I think of this, it's a shortcoming of the settlement layer
+
+// TODO(@ckartik): Add decay params and the blocknumber for L2 the block was observed in
 var settlementsTable = `
 CREATE TABLE IF NOT EXISTS settlements (
     commitment_index BYTEA PRIMARY KEY,

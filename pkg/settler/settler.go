@@ -70,6 +70,7 @@ type Oracle interface {
 		blockNum *big.Int,
 		builder string,
 		isSlash bool,
+		residualDecay *big.Int,
 	) (*types.Transaction, error)
 	UnlockFunds(opts *bind.TransactOpts, bidIDs [][32]byte) (*types.Transaction, error)
 }
@@ -256,6 +257,7 @@ RESTART:
 					big.NewInt(settlement.BlockNum),
 					settlement.Builder,
 					settlement.Type == SettlementTypeSlash,
+					new(big.Int).SetUint64(100),
 				)
 				if err != nil {
 					return fmt.Errorf("process commitment: %w nonce %d", err, opts.Nonce.Uint64())

@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS settlements (
     chainhash BYTEA,
     nonce BIGINT,
     settled BOOLEAN,
-	decay_percentage BIGINT
+    decay_percentage BIGINT
 );`
 
 var winnersTable = `

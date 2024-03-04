@@ -279,7 +279,6 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 
 	count := 0
 	for {
-		fmt.Println(count)
 		if count == 9 {
 			break
 		}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/big"
 	"strings"
 
@@ -35,6 +36,7 @@ type WinnerRegister interface {
 		builder string,
 		bidID []byte,
 		settlementType settler.SettlementType,
+		decayPercentage int64,
 	) error
 }
 
@@ -65,6 +67,7 @@ type Updater struct {
 func NewUpdater(
 	logger *slog.Logger,
 	l1Client EVMClient,
+	l2Client EVMClient,
 	winnerRegister WinnerRegister,
 	rollupClient Oracle,
 	preconfClient Preconf,
@@ -72,6 +75,7 @@ func NewUpdater(
 	return &Updater{
 		logger:               logger,
 		l1Client:             l1Client,
+		l2Client:             l2Client,
 		winnerRegister:       winnerRegister,
 		preconfClient:        preconfClient,
 		rollupClient:         rollupClient,
@@ -152,6 +156,12 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 							return fmt.Errorf("failed to get commitment: %w", err)
 						}
 
+						l2Block, err := u.l2Client.BlockByNumber(ctx, big.NewInt(int64(commitment.BlockNumber)))
+						if err != nil {
+							return fmt.Errorf("failed to get L2 Block: %w", err)
+						}
+						decayPercentage := computeDecayPercentage(commitment.DecayStartTimeStamp, commitment.DecayEndTimeStamp, l2Block.Header().Time)
+
 						settlementType := settler.SettlementTypeReturn
 
 						if commitment.Commiter.Cmp(builderAddr) == 0 {
@@ -177,6 +187,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 							commitment.Commiter.Hex(),
 							commitment.CommitmentHash[:],
 							settlementType,
+							decayPercentage,
 						)
 						if err != nil {
 							return fmt.Errorf("failed to add settlement: %w", err)
@@ -223,4 +234,18 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 	}()
 
 	return doneChan
+}
+
+// Takes in start time stamp, end timestamp, commit timestamp and computes a linear decay percentage
+// The computation does not care what format the timestamps are in, as long as they are consistent
+// (e.g they could be unix or unixMili timestamps)
+func computeDecayPercentage(startTimestamp, endTimestamp, commitTimestamp uint64) int64 {
+	// Calculate the total time in seconds
+	totalTime := endTimestamp - startTimestamp
+	// Calculate the time passed in seconds
+	timePassed := commitTimestamp - startTimestamp
+	// Calculate the decay percentage
+	decayPercentage := float64(timePassed) / float64(totalTime)
+
+	return int64(math.Round(decayPercentage * 100))
 }

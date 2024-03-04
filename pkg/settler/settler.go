@@ -32,13 +32,14 @@ const (
 )
 
 type Settlement struct {
-	CommitmentIdx []byte
-	TxHash        string
-	BlockNum      int64
-	Builder       string
-	Amount        uint64
-	BidID         []byte
-	Type          SettlementType
+	CommitmentIdx   []byte
+	TxHash          string
+	BlockNum        int64
+	Builder         string
+	Amount          uint64
+	BidID           []byte
+	Type            SettlementType
+	DecayPercentage int64
 }
 
 type Return struct {
@@ -257,7 +258,7 @@ RESTART:
 					big.NewInt(settlement.BlockNum),
 					settlement.Builder,
 					settlement.Type == SettlementTypeSlash,
-					new(big.Int).SetUint64(100),
+					big.NewInt(settlement.DecayPercentage),
 				)
 				if err != nil {
 					return fmt.Errorf("process commitment: %w nonce %d", err, opts.Nonce.Uint64())

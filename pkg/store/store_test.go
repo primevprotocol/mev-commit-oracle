@@ -233,6 +233,7 @@ func TestStore(t *testing.T) {
 				settlement.Builder,
 				settlement.BidID,
 				settlement.Type,
+				settlement.DecayPercentage,
 			)
 			if err != nil {
 				t.Fatalf("Failed to add settlement: %s", err)

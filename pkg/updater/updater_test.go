@@ -117,8 +117,13 @@ func TestUpdater(t *testing.T) {
 		done:        make(chan int64, 1),
 	}
 
-	testL1Client := &testL1Client{
+	l1Client := &testL1Client{
 		blockNum: 5,
+		block:    types.NewBlock(&types.Header{}, txns, nil, nil, NewHasher()),
+	}
+
+	l2Client := &testL1Client{
+		blockNum: 0,
 		block:    types.NewBlock(&types.Header{}, txns, nil, nil, NewHasher()),
 	}
 
@@ -134,7 +139,8 @@ func TestUpdater(t *testing.T) {
 
 	updtr := updater.NewUpdater(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		testL1Client,
+		l1Client,
+		l2Client,
 		testWinnerRegister,
 		testOracle,
 		testPreconf,
@@ -235,11 +241,15 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 		done:        make(chan int64, 1),
 	}
 
-	testL1Client := &testL1Client{
+	l1Client := &testL1Client{
 		blockNum: 5,
 		block:    types.NewBlock(&types.Header{}, txns, nil, nil, NewHasher()),
 	}
 
+	l2Client := &testL1Client{
+		blockNum: 0,
+		block:    types.NewBlock(&types.Header{Time: uint64(time.Now().UnixMilli())}, txns, nil, nil, NewHasher()),
+	}
 	testOracle := &testOracle{
 		builder:     "test",
 		builderAddr: builderAddr,
@@ -252,7 +262,8 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 
 	updtr := updater.NewUpdater(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		testL1Client,
+		l1Client,
+		l2Client,
 		testWinnerRegister,
 		testOracle,
 		testPreconf,
@@ -268,6 +279,7 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 
 	count := 0
 	for {
+		fmt.Println(count)
 		if count == 9 {
 			break
 		}
@@ -296,12 +308,13 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 }
 
 type testSettlement struct {
-	commitmentIdx  []byte
-	txHash         string
-	blockNum       int64
-	builder        string
-	amount         uint64
-	settlementType settler.SettlementType
+	commitmentIdx   []byte
+	txHash          string
+	blockNum        int64
+	builder         string
+	amount          uint64
+	settlementType  settler.SettlementType
+	decayPercentage int64
 }
 
 type testWinnerRegister struct {
@@ -328,14 +341,16 @@ func (t *testWinnerRegister) AddSettlement(
 	builder string,
 	_ []byte,
 	settlementType settler.SettlementType,
+	decayPercentage int64,
 ) error {
 	t.settlements <- testSettlement{
-		commitmentIdx:  commitmentIdx,
-		txHash:         txHash,
-		blockNum:       blockNum,
-		amount:         amount,
-		builder:        builder,
-		settlementType: settlementType,
+		commitmentIdx:   commitmentIdx,
+		txHash:          txHash,
+		blockNum:        blockNum,
+		amount:          amount,
+		builder:         builder,
+		settlementType:  settlementType,
+		decayPercentage: decayPercentage,
 	}
 	return nil
 }
@@ -349,7 +364,7 @@ func (t *testL1Client) BlockByNumber(ctx context.Context, blkNum *big.Int) (*typ
 	if blkNum.Int64() == t.blockNum {
 		return t.block, nil
 	}
-	return nil, errors.New("block not found")
+	return nil, fmt.Errorf("block %d not found", blkNum.Int64())
 }
 
 type testOracle struct {

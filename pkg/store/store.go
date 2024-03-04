@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS settlements (
     bid_id BYTEA,
     chainhash BYTEA,
     nonce BIGINT,
-    settled BOOLEAN
+    settled BOOLEAN,
+	decay_percentage BIGINT
 );`
 
 var winnersTable = `
@@ -163,6 +164,7 @@ func (s *Store) AddSettlement(
 	builder string,
 	bidID []byte,
 	settlementType settler.SettlementType,
+	decayPercentage int64,
 ) error {
 	columns := []string{
 		"commitment_index",
@@ -175,6 +177,7 @@ func (s *Store) AddSettlement(
 		"settled",
 		"chainhash",
 		"nonce",
+		"decay_percentage",
 	}
 	values := []interface{}{
 		commitmentIdx,
@@ -187,6 +190,7 @@ func (s *Store) AddSettlement(
 		false,
 		nil,
 		0,
+		decayPercentage,
 	}
 	placeholder := make([]string, len(values))
 	for i := range columns {
@@ -215,7 +219,7 @@ func (s *Store) SubscribeSettlements(ctx context.Context) <-chan settler.Settlem
 	RETRY:
 		for {
 			queryStr := `
-				SELECT commitment_index, transaction, block_number, builder_address, amount, bid_id, type
+				SELECT commitment_index, transaction, block_number, builder_address, amount, bid_id, type, decay_percentage
 				FROM settlements
 				WHERE settled = false AND chainhash IS NULL AND type != 'return'
 				ORDER BY block_number ASC`
@@ -236,6 +240,7 @@ func (s *Store) SubscribeSettlements(ctx context.Context) <-chan settler.Settlem
 					&s.Amount,
 					&s.BidID,
 					&s.Type,
+					&s.DecayPercentage,
 				)
 				if err != nil {
 					_ = results.Close()

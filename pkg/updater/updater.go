@@ -234,7 +234,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 	return doneChan
 }
 
-// Takes in start time stamp, end timestamp, commit timestamp and computes a linear decay percentage
+// computeDecayPercentage takes startTimestamp, endTimestamp, commitTimestamp and computes a linear decay percentage
 // The computation does not care what format the timestamps are in, as long as they are consistent
 // (e.g they could be unix or unixMili timestamps)
 func computeDecayPercentage(startTimestamp, endTimestamp, commitTimestamp uint64) int64 {

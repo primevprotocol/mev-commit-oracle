@@ -23,8 +23,6 @@ type BlockWinner struct {
 }
 
 type WinnerRegister interface {
-	// Need to delay subscribe winners somehow?
-	// This could be a brittle way to do it
 	SubscribeWinners(ctx context.Context) <-chan BlockWinner
 	UpdateComplete(ctx context.Context, blockNum int64) error
 	AddSettlement(

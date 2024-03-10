@@ -238,6 +238,10 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 // The computation does not care what format the timestamps are in, as long as they are consistent
 // (e.g they could be unix or unixMili timestamps)
 func computeDecayPercentage(startTimestamp, endTimestamp, commitTimestamp uint64) int64 {
+	if startTimestamp >= endTimestamp || startTimestamp > commitTimestamp {
+		return 0
+	}
+
 	// Calculate the total time in seconds
 	totalTime := endTimestamp - startTimestamp
 	// Calculate the time passed in seconds

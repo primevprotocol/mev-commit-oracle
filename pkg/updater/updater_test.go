@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
+	"log/slog"
 	"math/big"
 	"strings"
 	"testing"
@@ -131,6 +133,7 @@ func TestUpdater(t *testing.T) {
 	}
 
 	updtr := updater.NewUpdater(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		testL1Client,
 		testWinnerRegister,
 		testOracle,
@@ -248,6 +251,7 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 	}
 
 	updtr := updater.NewUpdater(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		testL1Client,
 		testWinnerRegister,
 		testOracle,

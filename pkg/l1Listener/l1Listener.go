@@ -15,6 +15,7 @@ var checkInterval = 2 * time.Second
 
 type WinnerRegister interface {
 	RegisterWinner(ctx context.Context, blockNum int64, winner string) error
+	RegisterAuctionWinner(ctx context.Context, blockNum int64, winner string) error
 }
 
 type EthClient interface {
@@ -76,6 +77,11 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 					continue
 				}
 
+				// We want to regiseter the winner of the auction for a given slot
+				relayWinner := auction.WinnerByNumber(ctx, big.NewInt(int64(blockNum)))
+				if relayWinner != "" {
+					err = l.winnerRegister.RegisterAuctionWinner(ctx, int64(blockNum), relayWinner)
+				}
 				winner := string(bytes.ToValidUTF8(header.Extra, []byte("�")))
 				if len(winner) == 0 {
 					log.Warn().

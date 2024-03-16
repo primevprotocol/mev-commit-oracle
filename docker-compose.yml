@@ -7,7 +7,7 @@ services:
       dockerfile: ./Dockerfile
     restart: always
     environment:
-      - L1_URL=${L1_URL}
+      - L1_URL=http://54.191.222.69:8545
       - ORACLE_USER=${ORACLE_USER}
       - ORACLE_PASS=${ORACLE_PASS}
     labels:
@@ -26,8 +26,6 @@ services:
         ]
     depends_on:
       - oracle-db
-    networks:
-      - primev_net
 
   oracle-db:
     image: postgres:latest
@@ -41,9 +39,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-networks:
-  primev_net:
-    external: true
 
 
 volumes:

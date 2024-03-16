@@ -99,6 +99,11 @@ func (t *testRegister) RegisterWinner(_ context.Context, blockNum int64, winner 
 	return nil
 }
 
+func (t *testRegister) RegisterAuctionWinner(_ context.Context, blockNum int64, winner string) error {
+	t.winners <- winnerObj{blockNum: blockNum, winner: winner}
+	return nil
+}
+
 type testEthClient struct {
 	mu      sync.Mutex
 	headers map[uint64]*types.Header

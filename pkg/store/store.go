@@ -96,6 +96,17 @@ func (s *Store) RegisterWinner(ctx context.Context, blockNum int64, winner strin
 	return nil
 }
 
+func (s *Store) RegisterAuctionWinner(ctx context.Context, blockNum int64, winner string) error {
+	insertStr := "INSERT INTO winners (block_number, builder_address, processed) VALUES ($1, $2, $3)"
+
+	_, err := s.db.ExecContext(ctx, insertStr, blockNum, winner, false)
+	if err != nil {
+		return err
+	}
+	s.triggerWinner()
+	return nil
+}
+
 func (s *Store) SubscribeWinners(ctx context.Context) <-chan updater.BlockWinner {
 	resChan := make(chan updater.BlockWinner)
 	go func() {

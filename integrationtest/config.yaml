@@ -3,7 +3,7 @@ keystore-path: /keystore
 keystore-password: primev
 log-level: debug
 l1-rpc-url: <L1_URL>
-settlement-rpc-url: http://sl-bootnode:8545
+settlement-rpc-url: http://54.191.222.69:8545
 pg-host: oracle-db
 pg-port: 5432
 pg-user: oracle_user

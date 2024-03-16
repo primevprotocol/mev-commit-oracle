@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/primevprotocol/mev-oracle/pkg/store"
@@ -47,14 +48,69 @@ func New(st *store.Store) *Service {
 	return srv
 }
 
-func Index(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("I OUTPUT STUFF2")
-	w.Write([]byte("Hello World"))
+func GetLeader(w http.ResponseWriter, r *http.Request) {
+	// Assuming the pattern is "/auction/leader/:blocknumber"
+	// Split the URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+
+	// Ensure the slice has enough parts to avoid out of range errors
+	// "/auction/leader/blocknumber" would split into 4 parts
+	if len(pathParts) < 4 {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	// The blocknumber is expected to be the 4th part
+	blocknumberStr := pathParts[3]
+
+	// Convert the blocknumber from string to int (or desired type)
+	blocknumber, err := strconv.Atoi(blocknumberStr)
+	if err != nil {
+		// Handle the error if the conversion fails
+		http.Error(w, "Invalid block number", http.StatusBadRequest)
+		return
+	}
+
+	w.Write([]byte(fmt.Sprintf("Auction Leader for block number %d", blocknumber)))
+}
+
+// Allows a user to send a json paylaod over HTTP to the server
+// The payload includes:
+// - The block number
+// - The address of the sender
+// - The amount of the bid
+
+func SendBid(w http.ResponseWriter, r *http.Request) {
+	// Process the json payload and serlialze into a struct
+	// Assuming the payload is in the form of:
+	// {
+	// 	"blocknumber": 123,
+	// 	"address": "0x1234",
+	// 	"amount": 100
+	// }
+	type Bid struct {
+		Blocknumber int    `json:"blocknumber"`
+		Address     string `json:"address"`
+		Amount      int    `json:"amount"`
+	}
+
+	// Deseralize json payload body into a Bid struct
+	var bid Bid
+	err := json.NewDecoder(r.Body).Decode(&bid)
+	if err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	// Write the bid to w
+	w.Write([]byte(fmt.Sprintf("Bid for block number %d from address %s for %d", bid.Blocknumber, bid.Address, bid.Amount)))
+
 }
 
 func (a *Service) registerAuctionEndpoints() {
 	// Router handle for /auction/leader/blocknumber
-	a.router.Handle("/auction/leader/blocknumber", http.HandlerFunc(Index))
+	a.router.Handle("/auction/leader/", http.HandlerFunc(GetLeader))
+	a.router.Handle("/auction/sendbid/", http.HandlerFunc(SendBid))
 }
 
 func (a *Service) registerDebugEndpoints() {

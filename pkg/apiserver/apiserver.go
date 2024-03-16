@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"expvar"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -42,6 +43,7 @@ func New(st *store.Store) *Service {
 	srv.registerDebugEndpoints()
 	srv.registerStatsEndpoints()
 	srv.registerAuctionEndpoints()
+	fmt.Println("I OUTPUT STUFF")
 	return srv
 }
 

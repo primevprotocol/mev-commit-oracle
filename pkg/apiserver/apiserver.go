@@ -48,6 +48,7 @@ func New(st *store.Store) *Service {
 }
 
 func Index(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("I OUTPUT STUFF2")
 	w.Write([]byte("Hello World"))
 }
 

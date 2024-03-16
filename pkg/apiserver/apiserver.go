@@ -41,7 +41,17 @@ func New(st *store.Store) *Service {
 
 	srv.registerDebugEndpoints()
 	srv.registerStatsEndpoints()
+	srv.registerAuctionEndpoints()
 	return srv
+}
+
+func Index(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("Hello World"))
+}
+
+func (a *Service) registerAuctionEndpoints() {
+	// Router handle for /auction/leader/blocknumber
+	a.router.Handle("/auction/leader/blocknumber", http.HandlerFunc(Index))
 }
 
 func (a *Service) registerDebugEndpoints() {

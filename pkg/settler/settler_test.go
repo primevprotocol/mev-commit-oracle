@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"io"
+	"log/slog"
 	"math/big"
+	"path"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,7 +16,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 )
@@ -196,13 +198,16 @@ func waitForCount(dur time.Duration, expected int, f func() int) error {
 func TestSettler(t *testing.T) {
 	t.Parallel()
 
-	key, err := crypto.GenerateKey()
+	ks, err := keysigner.NewPrivateKeySigner(path.Join(t.TempDir(), "key"))
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	ks := keysigner.NewPrivateKeySigner(key)
 	ownerAddr := common.HexToAddress("0xabcd")
+
+	key, err := ks.GetPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	orcl := &testOracle{key: key}
 	reg := &testRegister{
@@ -212,6 +217,7 @@ func TestSettler(t *testing.T) {
 	transactor := &testTransactor{}
 
 	s := settler.NewSettler(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		ks,
 		big.NewInt(1000),
 		ownerAddr,

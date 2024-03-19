@@ -1,25 +1,21 @@
 package main
 
 import (
-	"crypto/ecdsa"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	contracts "github.com/primevprotocol/contracts-abi/config"
 	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/primevprotocol/mev-oracle/pkg/node"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
 	"github.com/urfave/cli/v2/altsrc"
-	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -27,6 +23,24 @@ const (
 	defaultConfigDir = "~/.mev-commit-oracle"
 	defaultKeyFile   = "key"
 	defaultKeystore  = "keystore"
+)
+
+var (
+	portCheck = func(c *cli.Context, p int) error {
+		if p < 0 || p > 65535 {
+			return fmt.Errorf("invalid port number %d, expected 0 <= port <= 65535", p)
+		}
+		return nil
+	}
+
+	stringInCheck = func(flag string, opts []string) func(c *cli.Context, s string) error {
+		return func(c *cli.Context, s string) error {
+			if !slices.Contains(opts, s) {
+				return fmt.Errorf("invalid %s option %q, expected one of %s", flag, s, strings.Join(opts, ", "))
+			}
+			return nil
+		}
+	}
 )
 
 var (
@@ -48,22 +62,36 @@ var (
 		Usage:   "port to listen on for HTTP requests",
 		EnvVars: []string{"MEV_ORACLE_HTTP_PORT"},
 		Value:   defaultHTTPPort,
-		Action: func(c *cli.Context, p int) error {
-			if p < 0 || p > 65535 {
-				return fmt.Errorf("invalid port number: %d", p)
-			}
-			return nil
-		},
+		Action:  portCheck,
+	})
+
+	optionLogFmt = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "log-fmt",
+		Usage:   "log format to use, options are 'text' or 'json'",
+		EnvVars: []string{"MEV_ORACLE_LOG_FMT"},
+		Value:   "text",
+		Action:  stringInCheck("log-fmt", []string{"text", "json"}),
 	})
 
 	optionLogLevel = altsrc.NewStringFlag(&cli.StringFlag{
 		Name:    "log-level",
-		Usage:   "log level",
+		Usage:   "log level to use, options are 'debug', 'info', 'warn', 'error'",
 		EnvVars: []string{"MEV_ORACLE_LOG_LEVEL"},
 		Value:   "info",
-		Action: func(c *cli.Context, l string) error {
-			_, err := zerolog.ParseLevel(l)
-			return err
+		Action:  stringInCheck("log-level", []string{"debug", "info", "warn", "error"}),
+	})
+
+	optionLogTags = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "log-tags",
+		Usage:   "log tags is a comma-separated list of <name:value> pairs that will be inserted into each log line",
+		EnvVars: []string{"MEV_ORACLE_LOG_TAGS"},
+		Action: func(ctx *cli.Context, s string) error {
+			for i, p := range strings.Split(s, ",") {
+				if len(strings.Split(p, ":")) != 2 {
+					return fmt.Errorf("invalid log-tags at index %d, expecting <name:value>", i)
+				}
+			}
+			return nil
 		},
 	})
 
@@ -161,7 +189,9 @@ func main() {
 		optionConfig,
 		optionPrivKeyFile,
 		optionHTTPPort,
+		optionLogFmt,
 		optionLogLevel,
+		optionLogTags,
 		optionL1RPCUrl,
 		optionSettlementRPCUrl,
 		optionOracleContractAddr,
@@ -196,72 +226,6 @@ func main() {
 	}
 }
 
-func createKeyIfNotExists(c *cli.Context, path string) error {
-	// check if key already exists
-	if _, err := os.Stat(path); err == nil {
-		fmt.Fprintf(c.App.Writer, "Using existing private key: %s\n", path)
-		return nil
-	}
-
-	fmt.Fprintf(c.App.Writer, "Creating new private key: %s\n", path)
-
-	// check if parent directory exists
-	if _, err := os.Stat(filepath.Dir(path)); os.IsNotExist(err) {
-		// create parent directory
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			return err
-		}
-	}
-
-	privKey, err := crypto.GenerateKey()
-	if err != nil {
-		return err
-	}
-
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-
-	defer f.Close()
-
-	if err := crypto.SaveECDSA(path, privKey); err != nil {
-		return err
-	}
-
-	wallet := getEthAddressFromPubKey(&privKey.PublicKey)
-
-	fmt.Fprintf(c.App.Writer, "Private key saved to file: %s\n", path)
-	fmt.Fprintf(c.App.Writer, "Wallet address: %s\n", wallet.Hex())
-	return nil
-}
-
-func resolveFilePath(path string) (string, error) {
-	if path == "" {
-		return "", fmt.Errorf("path is empty")
-	}
-
-	if strings.HasPrefix(path, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-
-		return filepath.Join(home, path[1:]), nil
-	}
-
-	return path, nil
-}
-
-func getEthAddressFromPubKey(key *ecdsa.PublicKey) common.Address {
-	pbBytes := crypto.FromECDSAPub(key)
-	hash := sha3.NewLegacyKeccak256()
-	hash.Write(pbBytes[1:])
-	address := hash.Sum(nil)[12:]
-
-	return common.BytesToAddress(address)
-}
-
 func initializeApplication(c *cli.Context) error {
 	if err := verifyKeystorePasswordPresence(c); err != nil {
 		return err
@@ -283,18 +247,24 @@ func verifyKeystorePasswordPresence(c *cli.Context) error {
 
 // launchOracleWithConfig configures and starts the oracle based on the CLI context or config.yaml file.
 func launchOracleWithConfig(c *cli.Context) error {
+	logger, err := newLogger(
+		c.String(optionLogLevel.Name),
+		c.String(optionLogFmt.Name),
+		c.String(optionLogTags.Name),
+		c.App.Writer,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create logger: %w", err)
+	}
 	keySigner, err := setupKeySigner(c)
 	if err != nil {
 		return fmt.Errorf("failed to setup key signer: %w", err)
 	}
-
-	lvl, _ := zerolog.ParseLevel(c.String(optionLogLevel.Name))
-
-	zerolog.SetGlobalLevel(lvl)
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(os.Stdout).With().Caller().Logger()
+	logger.Info("key signer account", "address", keySigner.GetAddress().Hex(), "url", keySigner.String())
 
 	nd, err := node.NewNode(&node.Options{
+		Logger:              logger,
 		KeySigner:           keySigner,
 		HTTPPort:            c.Int(optionHTTPPort.Name),
 		L1RPCUrl:            c.String(optionL1RPCUrl.Name),
@@ -322,63 +292,69 @@ func launchOracleWithConfig(c *cli.Context) error {
 
 		err := nd.Close()
 		if err != nil {
-			log.Error().Err(err).Msg("failed to close node")
+			logger.Error("failed to close node", "error", err)
 		}
 	}()
 
 	select {
 	case <-closed:
 	case <-time.After(5 * time.Second):
-		log.Error().Msg("failed to close node in time")
+		logger.Error("failed to close node in time", "error", err)
 	}
 
 	return nil
 }
 
+// newLogger initializes a *slog.Logger with specified level, format, and sink.
+//   - lvl: string representation of slog.Level
+//   - logFmt: format of the log output: "text", "json", "none" defaults to "json"
+//   - tags: comma-separated list of <name:value> pairs that will be inserted into each log line
+//   - sink: destination for log output (e.g., os.Stdout, file)
+//
+// Returns a configured *slog.Logger on success or nil on failure.
+func newLogger(lvl, logFmt, tags string, sink io.Writer) (*slog.Logger, error) {
+	level := new(slog.LevelVar)
+	if err := level.UnmarshalText([]byte(lvl)); err != nil {
+		return nil, fmt.Errorf("invalid log level: %w", err)
+	}
+
+	var (
+		handler slog.Handler
+		options = &slog.HandlerOptions{
+			AddSource: true,
+			Level:     level,
+		}
+	)
+	switch logFmt {
+	case "text":
+		handler = slog.NewTextHandler(sink, options)
+	case "json", "none":
+		handler = slog.NewJSONHandler(sink, options)
+	default:
+		return nil, fmt.Errorf("invalid log format: %s", logFmt)
+	}
+
+	logger := slog.New(handler)
+
+	if tags == "" {
+		return logger, nil
+	}
+
+	var args []any
+	for i, p := range strings.Split(tags, ",") {
+		kv := strings.Split(p, ":")
+		if len(kv) != 2 {
+			return nil, fmt.Errorf("invalid tag at index %d", i)
+		}
+		args = append(args, strings.ToValidUTF8(kv[0], "�"), strings.ToValidUTF8(kv[1], "�"))
+	}
+
+	return logger.With(args...), nil
+}
+
 func setupKeySigner(c *cli.Context) (keysigner.KeySigner, error) {
 	if c.IsSet(optionKeystorePath.Name) {
-		return setupKeystoreSigner(c)
+		return keysigner.NewKeystoreSigner(c.String(optionKeystorePath.Name), c.String(optionKeystorePassword.Name))
 	}
-	return setupPrivateKeySigner(c)
-}
-
-func setupKeystoreSigner(c *cli.Context) (keysigner.KeySigner, error) {
-	// Load the keystore file
-	ks := keystore.NewKeyStore(c.String(optionKeystorePath.Name), keystore.LightScryptN, keystore.LightScryptP)
-	password := c.String(optionKeystorePassword.Name)
-	ksAccounts := ks.Accounts()
-
-	var account accounts.Account
-	if len(ksAccounts) == 0 {
-		var err error
-		account, err = ks.NewAccount(password)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create account: %w", err)
-		}
-	} else {
-		account = ksAccounts[0]
-	}
-
-	fmt.Fprintf(c.App.Writer, "Public address of the key: %s\n", account.Address.Hex())
-	fmt.Fprintf(c.App.Writer, "Path of the secret key file: %s\n", account.URL.Path)
-
-	return keysigner.NewKeystoreSigner(ks, password, account), nil
-}
-
-func setupPrivateKeySigner(c *cli.Context) (keysigner.KeySigner, error) {
-	privKeyFile, err := resolveFilePath(c.String(optionPrivKeyFile.Name))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get private key file path: %w", err)
-	}
-
-	if err := createKeyIfNotExists(c, privKeyFile); err != nil {
-		return nil, fmt.Errorf("failed to create private key: %w", err)
-	}
-
-	privKey, err := crypto.LoadECDSA(privKeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load private key from file '%s': %w", privKeyFile, err)
-	}
-
-	return keysigner.NewPrivateKeySigner(privKey), nil
+	return keysigner.NewPrivateKeySigner(c.String(optionPrivKeyFile.Name))
 }

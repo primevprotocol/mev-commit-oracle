@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"expvar"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -15,7 +16,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -25,6 +25,7 @@ const (
 // Service wraps http.Server with additional functionality for metrics and
 // other common middlewares.
 type Service struct {
+	logger          *slog.Logger
 	metricsRegistry *prometheus.Registry
 	router          *http.ServeMux
 	srv             *http.Server
@@ -32,8 +33,9 @@ type Service struct {
 }
 
 // New creates a new Service.
-func New(st *store.Store) *Service {
+func New(logger *slog.Logger, st *store.Store) *Service {
 	srv := &Service{
+		logger:          logger,
 		router:          http.NewServeMux(),
 		metricsRegistry: newMetrics(),
 		storage:         st,
@@ -44,12 +46,12 @@ func New(st *store.Store) *Service {
 	return srv
 }
 
-func (a *Service) registerDebugEndpoints() {
+func (s *Service) registerDebugEndpoints() {
 	// register metrics handler
-	a.router.Handle("/metrics", promhttp.HandlerFor(a.metricsRegistry, promhttp.HandlerOpts{}))
+	s.router.Handle("/metrics", promhttp.HandlerFor(s.metricsRegistry, promhttp.HandlerOpts{}))
 
 	// register pprof handlers
-	a.router.Handle(
+	s.router.Handle(
 		"/debug/pprof",
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			u := r.URL
@@ -57,17 +59,17 @@ func (a *Service) registerDebugEndpoints() {
 			http.Redirect(w, r, u.String(), http.StatusPermanentRedirect)
 		}),
 	)
-	a.router.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
-	a.router.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
-	a.router.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
-	a.router.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
-	a.router.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
-	a.router.Handle("/debug/pprof/{profile}", http.HandlerFunc(pprof.Index))
-	a.router.Handle("/debug/vars", expvar.Handler())
+	s.router.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
+	s.router.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
+	s.router.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
+	s.router.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+	s.router.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
+	s.router.Handle("/debug/pprof/{profile}", http.HandlerFunc(pprof.Index))
+	s.router.Handle("/debug/vars", expvar.Handler())
 }
 
-func (a *Service) registerStatsEndpoints() {
-	a.router.HandleFunc("/processed_blocks", func(w http.ResponseWriter, r *http.Request) {
+func (s *Service) registerStatsEndpoints() {
+	s.router.HandleFunc("/processed_blocks", func(w http.ResponseWriter, r *http.Request) {
 		pg := r.URL.Query().Get("page")
 		lim := r.URL.Query().Get("limit")
 
@@ -83,16 +85,16 @@ func (a *Service) registerStatsEndpoints() {
 			}
 		}
 
-		blocks, err := a.storage.ProcessedBlocks(limit, page)
+		blocks, err := s.storage.ProcessedBlocks(limit, page)
 		if err != nil {
-			log.Error().Err(err).Msg("failed to get processed blocks")
+			s.logger.Error("failed to get processed blocks", "error", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 		resp, err := json.Marshal(blocks)
 		if err != nil {
-			log.Error().Err(err).Msg("failed to marshal processed blocks")
+			s.logger.Error("failed to marshal processed blocks", "error", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -101,21 +103,21 @@ func (a *Service) registerStatsEndpoints() {
 		w.WriteHeader(http.StatusOK)
 		_, err = w.Write(resp)
 		if err != nil {
-			log.Error().Err(err).Msg("failed to write response")
+			s.logger.Error("failed to write response", "error", err)
 		}
 	})
 
-	a.router.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		stats, err := a.storage.CommitmentStats()
+	s.router.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+		stats, err := s.storage.CommitmentStats()
 		if err != nil {
-			log.Error().Err(err).Msg("failed to get stats")
+			s.logger.Error("failed to get stats", "error", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 		resp, err := json.Marshal(stats)
 		if err != nil {
-			log.Error().Err(err).Msg("failed to marshal stats")
+			s.logger.Error("failed to marshal stats", "error", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -124,7 +126,7 @@ func (a *Service) registerStatsEndpoints() {
 		w.WriteHeader(http.StatusOK)
 		_, err = w.Write(resp)
 		if err != nil {
-			log.Error().Err(err).Msg("failed to write response")
+			s.logger.Error("failed to write response", "error", err)
 		}
 	})
 }
@@ -143,8 +145,8 @@ func newMetrics() (r *prometheus.Registry) {
 	return r
 }
 
-func (a *Service) Start(addr string) <-chan struct{} {
-	log.Info().Msg("starting api server")
+func (s *Service) Start(addr string) <-chan struct{} {
+	s.logger.Info("starting api server")
 
 	srv := &http.Server{
 		Addr: addr,
@@ -152,16 +154,17 @@ func (a *Service) Start(addr string) <-chan struct{} {
 			recorder := &responseStatusRecorder{ResponseWriter: w}
 
 			start := time.Now()
-			a.router.ServeHTTP(recorder, req)
-			log.Info().
-				Int("status", recorder.status).
-				Str("method", req.Method).
-				Str("path", req.URL.Path).
-				Dur("duration", time.Since(start)).
-				Msg("api access")
+			s.router.ServeHTTP(recorder, req)
+			s.logger.Info(
+				"api access",
+				slog.Int("status", recorder.status),
+				slog.String("method", req.Method),
+				slog.String("path", req.URL.Path),
+				slog.Duration("duration", time.Since(start)),
+			)
 		}),
 	}
-	a.srv = srv
+	s.srv = srv
 
 	done := make(chan struct{})
 	go func() {
@@ -169,24 +172,24 @@ func (a *Service) Start(addr string) <-chan struct{} {
 
 		err := srv.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("api server failed")
+			s.logger.Error("api server failed", "error", err)
 		}
 	}()
 
 	return done
 }
 
-func (a *Service) Stop() error {
-	log.Info().Msg("stopping api server")
-	if a.srv == nil {
+func (s *Service) Stop() error {
+	s.logger.Info("stopping api server")
+	if s.srv == nil {
 		return nil
 	}
-	return a.srv.Shutdown(context.Background())
+	return s.srv.Shutdown(context.Background())
 }
 
 // RegisterMetricsCollectors registers prometheus collectors.
-func (a *Service) RegisterMetricsCollectors(cs ...prometheus.Collector) {
-	a.metricsRegistry.MustRegister(cs...)
+func (s *Service) RegisterMetricsCollectors(cs ...prometheus.Collector) {
+	s.metricsRegistry.MustRegister(cs...)
 }
 
 type responseStatusRecorder struct {

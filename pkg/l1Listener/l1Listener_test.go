@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"math/big"
 	"sort"
 	"sync"
@@ -25,7 +27,11 @@ func TestL1Listener(t *testing.T) {
 		errC:    make(chan error, 1),
 	}
 
-	l := l1Listener.NewL1Listener(ethClient, reg)
+	l := l1Listener.NewL1Listener(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ethClient,
+		reg,
+	)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cl := l1Listener.SetCheckInterval(100 * time.Millisecond)

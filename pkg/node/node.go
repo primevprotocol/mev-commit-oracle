@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"time"
 
@@ -21,10 +22,10 @@ import (
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/primevprotocol/mev-oracle/pkg/store"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
-	"github.com/rs/zerolog/log"
 )
 
 type Options struct {
+	Logger              *slog.Logger
 	KeySigner           keysigner.KeySigner
 	HTTPPort            int
 	SettlementRPCUrl    string
@@ -41,23 +42,24 @@ type Options struct {
 }
 
 type Node struct {
+	logger    *slog.Logger
 	waitClose func()
 	dbCloser  io.Closer
 }
 
 func NewNode(opts *Options) (*Node, error) {
-	nd := &Node{}
+	nd := &Node{logger: opts.Logger}
 
 	db, err := initDB(opts)
 	if err != nil {
-		log.Error().Err(err).Msg("failed initializing DB")
+		opts.Logger.Error("failed initializing DB", "error", err)
 		return nil, err
 	}
 	nd.dbCloser = db
 
 	st, err := store.NewStore(db)
 	if err != nil {
-		log.Error().Err(err).Msg("failed initializing store")
+		nd.logger.Error("failed initializing store", "error", err)
 		return nil, err
 	}
 
@@ -65,19 +67,19 @@ func NewNode(opts *Options) (*Node, error) {
 
 	settlementClient, err := ethclient.Dial(opts.SettlementRPCUrl)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to connect to the settlement layer")
+		nd.logger.Error("failed to connect to the settlement layer", "error", err)
 		return nil, err
 	}
 
 	chainID, err := settlementClient.ChainID(context.Background())
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed getting chain ID")
+		nd.logger.Error("failed getting chain ID", "error", err)
 		return nil, err
 	}
 
 	l1Client, err := ethclient.Dial(opts.L1RPCUrl)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to connect to the L1 Ethereum client")
+		nd.logger.Error("Failed to connect to the L1 Ethereum client", "error", err)
 		return nil, err
 	}
 
@@ -95,14 +97,14 @@ func NewNode(opts *Options) (*Node, error) {
 		settlementClient,
 	)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to instantiate preconf contract")
+		nd.logger.Error("failed to instantiate preconf contract", "error", err)
 		cancel()
 		return nil, err
 	}
 
 	oracleContract, err := rollupclient.NewOracle(opts.OracleContractAddr, settlementClient)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to instantiate oracle contract")
+		nd.logger.Error("failed to instantiate oracle contract", "error", err)
 		cancel()
 		return nil, err
 	}
@@ -120,14 +122,14 @@ func NewNode(opts *Options) (*Node, error) {
 				winner,
 			)
 			if err != nil {
-				log.Fatal().Err(err).Msg("failed to set builder mapping")
+				nd.logger.Error("failed to set builder mapping", "error", err)
 				cancel()
 				return nil, err
 			}
 		}
 	}
 
-	l1Lis := l1Listener.NewL1Listener(listenerL1Client, st)
+	l1Lis := l1Listener.NewL1Listener(nd.logger.With("component", "l1_listener"), listenerL1Client, st)
 	l1LisClosed := l1Lis.Start(ctx)
 
 	callOpts := bind.CallOpts{
@@ -142,10 +144,11 @@ func NewNode(opts *Options) (*Node, error) {
 	}
 	oc := &rollupclient.OracleSession{Contract: oracleContract, CallOpts: callOpts}
 
-	updtr := updater.NewUpdater(l1Client, st, oc, pc)
+	updtr := updater.NewUpdater(nd.logger.With("component", "updater"), l1Client, st, oc, pc)
 	updtrClosed := updtr.Start(ctx)
 
 	settlr := settler.NewSettler(
+		nd.logger.With("component", "settler"),
 		opts.KeySigner,
 		chainID,
 		owner,
@@ -155,7 +158,7 @@ func NewNode(opts *Options) (*Node, error) {
 	)
 	settlrClosed := settlr.Start(ctx)
 
-	srv := apiserver.New(st)
+	srv := apiserver.New(nd.logger.With("component", "apiserver"), st)
 	srv.RegisterMetricsCollectors(l1Lis.Metrics()...)
 	srv.RegisterMetricsCollectors(updtr.Metrics()...)
 	srv.RegisterMetricsCollectors(settlr.Metrics()...)
@@ -202,10 +205,10 @@ func (n *Node) Close() (err error) {
 
 	select {
 	case <-workersClosed:
-		log.Info().Msg("All workers closed")
+		n.logger.Info("all workers closed")
 		return nil
 	case <-time.After(10 * time.Second):
-		log.Error().Msg("Timeout waiting for workers to close")
+		n.logger.Error("timeout waiting for workers to close")
 		return errors.New("timeout waiting for workers to close")
 	}
 }

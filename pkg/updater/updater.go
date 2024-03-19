@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"strings"
 
@@ -13,7 +14,6 @@ import (
 	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rs/zerolog/log"
 )
 
 type BlockWinner struct {
@@ -50,6 +50,7 @@ type Preconf interface {
 }
 
 type Updater struct {
+	logger               *slog.Logger
 	l1Client             L1Client
 	winnerRegister       WinnerRegister
 	preconfClient        Preconf
@@ -59,12 +60,14 @@ type Updater struct {
 }
 
 func NewUpdater(
+	logger *slog.Logger,
 	l1Client L1Client,
 	winnerRegister WinnerRegister,
 	rollupClient Oracle,
 	preconfClient Preconf,
 ) *Updater {
 	return &Updater{
+		logger:               logger,
 		l1Client:             l1Client,
 		winnerRegister:       winnerRegister,
 		preconfClient:        preconfClient,
@@ -107,9 +110,7 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 						builderAddr, err = u.rollupClient.GetBuilder(winner.Winner)
 						if err != nil {
 							if errors.Is(err, ethereum.NotFound) {
-								log.Warn().
-									Str("builder", winner.Winner).
-									Msg("builder not registered")
+								u.logger.Warn("builder not registered", "builder", winner.Winner)
 								return u.winnerRegister.UpdateComplete(ctx, winner.BlockNumber)
 							}
 							return fmt.Errorf("failed to get builder address: %w", err)
@@ -134,11 +135,12 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 						return fmt.Errorf("failed to get commitments by block number: %w", err)
 					}
 
-					log.Debug().
-						Int("commitments_count", len(commitmentIndexes)).
-						Int("txns_count", len(txnsInBlock)).
-						Int64("blockNumber", winner.BlockNumber).
-						Msg("commitment indexes")
+					u.logger.Debug(
+						"commitment indexes",
+						"commitments_count", len(commitmentIndexes),
+						"txns_count", len(txnsInBlock),
+						"blockNumber", winner.BlockNumber,
+					)
 
 					total, rewards, slashes := 0, 0, 0
 					for _, index := range commitmentIndexes {
@@ -196,22 +198,20 @@ func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 					u.metrics.SlashesCount.Add(float64(slashes))
 					u.metrics.BlockCommitmentsCount.Inc()
 
-					log.Info().
-						Int("total", total).
-						Int("rewards", rewards).
-						Int("slashes", slashes).
-						Int64("blockNumber", winner.BlockNumber).
-						Str("winner", winner.Winner).
-						Msg("added settlements")
+					u.logger.Info(
+						"added settlements",
+						"total", total,
+						"rewards", rewards,
+						"slashes", slashes,
+						"blockNumber", winner.BlockNumber,
+						"winner", winner.Winner,
+					)
 
 					return nil
 				}()
 
 				if err != nil {
-					log.Error().Err(err).
-						Int64("blockNumber", winner.BlockNumber).
-						Str("winner", winner.Winner).
-						Msg("failed to process settlements")
+					u.logger.Error("failed to process settlements", "blockNumber", winner.BlockNumber, "winner", winner.Winner, "error", err)
 					unsub()
 					goto RESTART
 				}

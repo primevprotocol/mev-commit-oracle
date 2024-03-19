@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"strings"
 	"sync"
@@ -14,7 +15,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -83,6 +83,7 @@ type Transactor interface {
 }
 
 type Settler struct {
+	logger          *slog.Logger
 	keySigner       keysigner.KeySigner
 	chainID         *big.Int
 	owner           common.Address
@@ -94,6 +95,7 @@ type Settler struct {
 }
 
 func NewSettler(
+	logger *slog.Logger,
 	keySigner keysigner.KeySigner,
 	chainID *big.Int,
 	owner common.Address,
@@ -102,6 +104,7 @@ func NewSettler(
 	client Transactor,
 ) *Settler {
 	return &Settler{
+		logger:          logger,
 		rollupClient:    rollupClient,
 		settlerRegister: settlerRegister,
 		owner:           owner,
@@ -166,7 +169,7 @@ func (s *Settler) settlementUpdater(ctx context.Context) error {
 
 		currentBlock, err := s.client.BlockNumber(ctx)
 		if err != nil {
-			log.Error().Err(err).Msg("failed to get block number")
+			s.logger.Error("failed to get block number", "error", err)
 			continue
 		}
 
@@ -180,13 +183,13 @@ func (s *Settler) settlementUpdater(ctx context.Context) error {
 			new(big.Int).SetUint64(currentBlock),
 		)
 		if err != nil {
-			log.Error().Err(err).Msg("failed to get nonce")
+			s.logger.Error("failed to get nonce", "error", err)
 			continue
 		}
 
 		count, err := s.settlerRegister.MarkSettlementComplete(ctx, lastNonce)
 		if err != nil {
-			log.Error().Err(err).Msg("failed to mark settlement complete")
+			s.logger.Error("failed to mark settlement complete", "error", err)
 			continue
 		}
 
@@ -195,7 +198,7 @@ func (s *Settler) settlementUpdater(ctx context.Context) error {
 		s.metrics.SettlementsConfirmedCount.Add(float64(count))
 
 		if count > 0 {
-			log.Info().Int("count", count).Msg("marked settlement complete")
+			s.logger.Info("marked settlement complete", "count", count)
 		}
 
 		lastBlock = currentBlock
@@ -223,9 +226,7 @@ RESTART:
 				defer s.txMtx.Unlock()
 
 				if settlement.Type == SettlementTypeReturn {
-					log.Warn().
-						Str("commitmentIdx", fmt.Sprintf("%x", settlement.CommitmentIdx)).
-						Msg("return settlement")
+					s.logger.Warn("return settlement", "commitmentIdx", fmt.Sprintf("%x", settlement.CommitmentIdx))
 					return nil
 				}
 
@@ -274,18 +275,19 @@ RESTART:
 				s.metrics.SettlementsPostedCount.Inc()
 				s.metrics.CurrentSettlementL1Block.Set(float64(settlement.BlockNum))
 
-				log.Info().
-					Int64("blockNum", settlement.BlockNum).
-					Str("txHash", commitmentPostingTxn.Hash().Hex()).
-					Str("builder", settlement.Builder).
-					Str("settlementType", string(settlement.Type)).
-					Uint64("nonce", commitmentPostingTxn.Nonce()).
-					Msg("builder commitment processed")
+				s.logger.Info(
+					"builder commitment processed",
+					"blockNum", settlement.BlockNum,
+					"txHash", commitmentPostingTxn.Hash().Hex(),
+					"builder", settlement.Builder,
+					"settlementType", string(settlement.Type),
+					"nonce", commitmentPostingTxn.Nonce(),
+				)
 
 				return nil
 			}()
 			if err != nil {
-				log.Error().Err(err).Msg("failed to process builder commitment")
+				s.logger.Error("failed to process builder commitment", "error", err)
 				unsub()
 				time.Sleep(5 * time.Second)
 				goto RESTART
@@ -335,10 +337,7 @@ RESTART:
 					bidIDs = append(bidIDs, b)
 				}
 
-				log.Debug().
-					Stringer("bidIDs", returns).
-					Int("count", len(returns.BidIDs)).
-					Msg("processing return")
+				s.logger.Debug("processing return", "bidIDs", returns, "count", len(returns.BidIDs))
 
 				commitmentPostingTxn, err := s.rollupClient.UnlockFunds(
 					opts,
@@ -361,16 +360,17 @@ RESTART:
 				s.metrics.LastUsedNonce.Set(float64(commitmentPostingTxn.Nonce()))
 				s.metrics.SettlementsPostedCount.Inc()
 
-				log.Info().
-					Str("txHash", commitmentPostingTxn.Hash().Hex()).
-					Int("batchSize", len(returns.BidIDs)).
-					Uint64("nonce", commitmentPostingTxn.Nonce()).
-					Msg("builder return processed")
+				s.logger.Info(
+					"builder return processed",
+					"txHash", commitmentPostingTxn.Hash().Hex(),
+					"batchSize", len(returns.BidIDs),
+					"nonce", commitmentPostingTxn.Nonce(),
+				)
 
 				return nil
 			}()
 			if err != nil {
-				log.Error().Err(err).Msg("failed to process return")
+				s.logger.Error("failed to process return", "error", err)
 				unsub()
 				time.Sleep(5 * time.Second)
 				goto RESTART
@@ -399,7 +399,7 @@ func (s *Settler) Start(ctx context.Context) <-chan struct{} {
 	go func() {
 		defer close(doneChan)
 		if err := eg.Wait(); err != nil {
-			log.Error().Err(err).Msg("settler error")
+			s.logger.Error("settler error", "error", err)
 		}
 	}()
 

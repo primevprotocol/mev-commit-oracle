@@ -3,12 +3,12 @@ package l1Listener
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rs/zerolog/log"
 )
 
 var checkInterval = 2 * time.Second
@@ -23,16 +23,19 @@ type EthClient interface {
 }
 
 type L1Listener struct {
+	logger         *slog.Logger
 	l1Client       EthClient
 	winnerRegister WinnerRegister
 	metrics        *metrics
 }
 
 func NewL1Listener(
+	logger *slog.Logger,
 	l1Client EthClient,
 	winnerRegister WinnerRegister,
 ) *L1Listener {
 	return &L1Listener{
+		logger:         logger,
 		l1Client:       l1Client,
 		winnerRegister: winnerRegister,
 		metrics:        newMetrics(),
@@ -60,7 +63,7 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 			case <-ticker.C:
 				blockNum, err := l.l1Client.BlockNumber(ctx)
 				if err != nil {
-					log.Error().Err(err).Msg("failed to get block number")
+					l.logger.Error("failed to get block number", "error", err)
 					continue
 				}
 
@@ -70,34 +73,25 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 
 				header, err := l.l1Client.HeaderByNumber(ctx, big.NewInt(int64(blockNum)))
 				if err != nil {
-					log.Error().Err(err).
-						Uint64("block", blockNum).
-						Msg("failed to get header")
+					l.logger.Error("failed to get header", "block", blockNum, "error", err)
 					continue
 				}
 
 				winner := string(bytes.ToValidUTF8(header.Extra, []byte("�")))
 				if len(winner) == 0 {
-					log.Warn().
-						Int64("block", header.Number.Int64()).
-						Msg("no winner registered")
+					l.logger.Warn("no winner registered", "block", header.Number.Int64())
 					continue
 				} else {
 					err = l.winnerRegister.RegisterWinner(ctx, int64(blockNum), winner)
 					if err != nil {
-						log.Error().Err(err).
-							Uint64("block", blockNum).
-							Msg("failed to register winner for block")
+						l.logger.Error("failed to register winner for block", "block", blockNum, "error", err)
 						return
 					}
 
 					l.metrics.WinnerRoundCount.WithLabelValues(winner).Inc()
 					l.metrics.WinnerCount.Inc()
 
-					log.Info().
-						Str("winner", winner).
-						Int64("block", header.Number.Int64()).
-						Msg("registered winner")
+					l.logger.Info("registered winner", "winner", winner, "block", header.Number.Int64())
 				}
 				currentBlockNo = int(blockNum)
 			}

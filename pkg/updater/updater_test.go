@@ -82,15 +82,17 @@ func TestUpdater(t *testing.T) {
 
 		if i%2 == 0 {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-				Commiter:       builderAddr,
-				TxnHash:        strings.TrimPrefix(txn.Hash().Hex(), "0x"),
-				CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
+				Commiter:        builderAddr,
+				TxnHash:         strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				CommitmentHash:  common.HexToHash(fmt.Sprintf("0x%02d", i)),
+				BlockCommitedAt: big.NewInt(0),
 			}
 		} else {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-				Commiter:       otherBuilderAddr,
-				TxnHash:        strings.TrimPrefix(txn.Hash().Hex(), "0x"),
-				CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
+				Commiter:        otherBuilderAddr,
+				TxnHash:         strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				CommitmentHash:  common.HexToHash(fmt.Sprintf("0x%02d", i)),
+				BlockCommitedAt: big.NewInt(0),
 			}
 		}
 	}
@@ -105,9 +107,10 @@ func TestUpdater(t *testing.T) {
 		}
 
 		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-			Commiter:       builderAddr,
-			TxnHash:        bundle,
-			CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
+			Commiter:        builderAddr,
+			TxnHash:         bundle,
+			CommitmentHash:  common.HexToHash(fmt.Sprintf("0x%02d", i)),
+			BlockCommitedAt: big.NewInt(0),
 		}
 	}
 
@@ -230,8 +233,9 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 		}
 
 		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-			Commiter: builderAddr,
-			TxnHash:  bundle,
+			Commiter:        builderAddr,
+			TxnHash:         bundle,
+			BlockCommitedAt: big.NewInt(0),
 		}
 	}
 

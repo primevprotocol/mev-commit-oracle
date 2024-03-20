@@ -32,13 +32,14 @@ const (
 )
 
 type Settlement struct {
-	CommitmentIdx []byte
-	TxHash        string
-	BlockNum      int64
-	Builder       string
-	Amount        uint64
-	BidID         []byte
-	Type          SettlementType
+	CommitmentIdx   []byte
+	TxHash          string
+	BlockNum        int64
+	Builder         string
+	Amount          uint64
+	BidID           []byte
+	Type            SettlementType
+	DecayPercentage int64
 }
 
 type Return struct {
@@ -70,6 +71,7 @@ type Oracle interface {
 		blockNum *big.Int,
 		builder string,
 		isSlash bool,
+		residualDecay *big.Int,
 	) (*types.Transaction, error)
 	UnlockFunds(opts *bind.TransactOpts, bidIDs [][32]byte) (*types.Transaction, error)
 }
@@ -256,6 +258,7 @@ RESTART:
 					big.NewInt(settlement.BlockNum),
 					settlement.Builder,
 					settlement.Type == SettlementTypeSlash,
+					big.NewInt(settlement.DecayPercentage),
 				)
 				if err != nil {
 					return fmt.Errorf("process commitment: %w nonce %d", err, opts.Nonce.Uint64())

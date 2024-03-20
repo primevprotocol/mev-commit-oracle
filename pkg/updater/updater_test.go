@@ -56,6 +56,11 @@ func (h *testHasher) Hash() common.Hash {
 func TestUpdater(t *testing.T) {
 	t.Parallel()
 
+	// timestamp of the First block commitment is X
+	startTimestamp := time.UnixMilli(1615195200000)
+	midTimestamp := startTimestamp.Add(time.Duration(2.5 * float64(time.Second)))
+	endTimestamp := startTimestamp.Add(5 * time.Second)
+
 	key, err := crypto.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
@@ -82,15 +87,21 @@ func TestUpdater(t *testing.T) {
 
 		if i%2 == 0 {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-				Commiter:       builderAddr,
-				TxnHash:        strings.TrimPrefix(txn.Hash().Hex(), "0x"),
-				CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
+				Commiter:            builderAddr,
+				TxnHash:             strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				CommitmentHash:      common.HexToHash(fmt.Sprintf("0x%02d", i)),
+				BlockCommitedAt:     big.NewInt(0),
+				DecayStartTimeStamp: uint64(startTimestamp.UnixMilli()),
+				DecayEndTimeStamp:   uint64(endTimestamp.UnixMilli()),
 			}
 		} else {
 			commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-				Commiter:       otherBuilderAddr,
-				TxnHash:        strings.TrimPrefix(txn.Hash().Hex(), "0x"),
-				CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
+				Commiter:            otherBuilderAddr,
+				TxnHash:             strings.TrimPrefix(txn.Hash().Hex(), "0x"),
+				CommitmentHash:      common.HexToHash(fmt.Sprintf("0x%02d", i)),
+				BlockCommitedAt:     big.NewInt(0),
+				DecayStartTimeStamp: uint64(startTimestamp.UnixMilli()),
+				DecayEndTimeStamp:   uint64(endTimestamp.UnixMilli()),
 			}
 		}
 	}
@@ -105,9 +116,12 @@ func TestUpdater(t *testing.T) {
 		}
 
 		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-			Commiter:       builderAddr,
-			TxnHash:        bundle,
-			CommitmentHash: common.HexToHash(fmt.Sprintf("0x%02d", i)),
+			Commiter:            builderAddr,
+			TxnHash:             bundle,
+			CommitmentHash:      common.HexToHash(fmt.Sprintf("0x%02d", i)),
+			BlockCommitedAt:     big.NewInt(0),
+			DecayStartTimeStamp: uint64(startTimestamp.UnixMilli()),
+			DecayEndTimeStamp:   uint64(endTimestamp.UnixMilli()),
 		}
 	}
 
@@ -117,9 +131,14 @@ func TestUpdater(t *testing.T) {
 		done:        make(chan int64, 1),
 	}
 
-	testL1Client := &testL1Client{
+	l1Client := &testL1Client{
 		blockNum: 5,
 		block:    types.NewBlock(&types.Header{}, txns, nil, nil, NewHasher()),
+	}
+
+	l2Client := &testL1Client{
+		blockNum: 0,
+		block:    types.NewBlock(&types.Header{Time: uint64(midTimestamp.UnixMilli())}, txns, nil, nil, NewHasher()),
 	}
 
 	testOracle := &testOracle{
@@ -134,7 +153,8 @@ func TestUpdater(t *testing.T) {
 
 	updtr := updater.NewUpdater(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		testL1Client,
+		l1Client,
+		l2Client,
 		testWinnerRegister,
 		testOracle,
 		testPreconf,
@@ -155,6 +175,9 @@ func TestUpdater(t *testing.T) {
 			break
 		}
 		settlement := <-testWinnerRegister.settlements
+		if settlement.decayPercentage != 50 {
+			t.Fatalf("wrong decay percentage, got %d", settlement.decayPercentage)
+		}
 		if settlement.blockNum != 5 {
 			t.Fatal("wrong block number")
 		}
@@ -224,8 +247,9 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 		}
 
 		commitments[string(idxBytes[:])] = preconf.PreConfCommitmentStorePreConfCommitment{
-			Commiter: builderAddr,
-			TxnHash:  bundle,
+			Commiter:        builderAddr,
+			TxnHash:         bundle,
+			BlockCommitedAt: big.NewInt(0),
 		}
 	}
 
@@ -235,11 +259,15 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 		done:        make(chan int64, 1),
 	}
 
-	testL1Client := &testL1Client{
+	l1Client := &testL1Client{
 		blockNum: 5,
 		block:    types.NewBlock(&types.Header{}, txns, nil, nil, NewHasher()),
 	}
 
+	l2Client := &testL1Client{
+		blockNum: 0,
+		block:    types.NewBlock(&types.Header{Time: uint64(time.Now().UnixMilli())}, txns, nil, nil, NewHasher()),
+	}
 	testOracle := &testOracle{
 		builder:     "test",
 		builderAddr: builderAddr,
@@ -252,7 +280,8 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 
 	updtr := updater.NewUpdater(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		testL1Client,
+		l1Client,
+		l2Client,
 		testWinnerRegister,
 		testOracle,
 		testPreconf,
@@ -296,12 +325,13 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 }
 
 type testSettlement struct {
-	commitmentIdx  []byte
-	txHash         string
-	blockNum       int64
-	builder        string
-	amount         uint64
-	settlementType settler.SettlementType
+	commitmentIdx   []byte
+	txHash          string
+	blockNum        int64
+	builder         string
+	amount          uint64
+	settlementType  settler.SettlementType
+	decayPercentage int64
 }
 
 type testWinnerRegister struct {
@@ -328,14 +358,16 @@ func (t *testWinnerRegister) AddSettlement(
 	builder string,
 	_ []byte,
 	settlementType settler.SettlementType,
+	decayPercentage int64,
 ) error {
 	t.settlements <- testSettlement{
-		commitmentIdx:  commitmentIdx,
-		txHash:         txHash,
-		blockNum:       blockNum,
-		amount:         amount,
-		builder:        builder,
-		settlementType: settlementType,
+		commitmentIdx:   commitmentIdx,
+		txHash:          txHash,
+		blockNum:        blockNum,
+		amount:          amount,
+		builder:         builder,
+		settlementType:  settlementType,
+		decayPercentage: decayPercentage,
 	}
 	return nil
 }
@@ -349,7 +381,7 @@ func (t *testL1Client) BlockByNumber(ctx context.Context, blkNum *big.Int) (*typ
 	if blkNum.Int64() == t.blockNum {
 		return t.block, nil
 	}
-	return nil, errors.New("block not found")
+	return nil, fmt.Errorf("block %d not found", blkNum.Int64())
 }
 
 type testOracle struct {

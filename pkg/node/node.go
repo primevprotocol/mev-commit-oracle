@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"math/big"
 	"time"
@@ -86,7 +85,7 @@ func NewNode(opts *Options) (*Node, error) {
 
 	l2Client, err := ethclient.Dial(opts.SettlementRPCUrl)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to connect to the L2 Ethereum client")
+		nd.logger.Error("Failed to connect to the L2 Ethereum client", "error", err)
 		return nil, err
 	}
 

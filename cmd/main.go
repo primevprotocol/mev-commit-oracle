@@ -5,9 +5,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -283,7 +285,13 @@ func launchOracleWithConfig(c *cli.Context) error {
 		return fmt.Errorf("failed starting node: %w", err)
 	}
 
-	<-c.Done()
+	interruptSigChan := make(chan os.Signal, 1)
+	signal.Notify(interruptSigChan, os.Interrupt, syscall.SIGTERM)
+	// Block until interrupt signal OR context's Done channel is closed.
+	select {
+	case <-interruptSigChan:
+	case <-c.Done():
+	}
 	fmt.Fprintf(c.App.Writer, "shutting down...\n")
 	closed := make(chan struct{})
 

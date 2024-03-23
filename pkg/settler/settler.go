@@ -285,6 +285,7 @@ RESTART:
 					"builder", settlement.Builder,
 					"settlementType", string(settlement.Type),
 					"nonce", commitmentPostingTxn.Nonce(),
+					"decayPercentage", settlement.DecayPercentage,
 				)
 
 				return nil

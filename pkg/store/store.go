@@ -32,25 +32,57 @@ CREATE TABLE IF NOT EXISTS settlements (
     chainhash BYTEA,
     nonce BIGINT,
     settled BOOLEAN,
-    decay_percentage BIGINT
+    decay_percentage BIGINT,
+    settlement_window BIGINT
+);`
+
+var encryptedCommitmentsTable = `
+CREATE TABLE IF NOT EXISTS encrypted_commitments (
+    commitment_index BYTEA PRIMARY KEY,
+    committer BYTEA,
+    commitment_hash BYTEA,
+    commitment_signature BYTEA,
+    block_number BIGINT
 );`
 
 var winnersTable = `
 CREATE TABLE IF NOT EXISTS winners (
-    block_number BIGINT PRIMARY KEY,
-    builder_address BYTEA,
-    processed BOOLEAN
+	block_number BIGINT PRIMARY KEY,
+	builder_address BYTEA,
+	settlement_window BIGINT
+);`
+
+var bidderTable = `
+CREATE TABLE IF NOT EXISTS bidders (
+    bidder_address BYTEA,
+    settlement_window BIGINT,
+    amount NUMERIC(24, 0),
+    chainhash BYTEA,
+    nonce BIGINT,
+    settled BOOLEAN,
+    PRIMARY KEY (bidder_address, settlement_window)
+);`
+
+var transactionsTable = `
+CREATE TABLE IF NOT EXISTS sent_transactions (
+    hash BYTEA PRIMARY KEY,
+    nonce BIGINT,
+    settled BOOLEAN
 );`
 
 type Store struct {
-	db       *sql.DB
-	winnerT  chan struct{}
-	settlerT chan struct{}
-	returnT  chan struct{}
+	db *sql.DB
 }
 
 func NewStore(db *sql.DB) (*Store, error) {
-	for _, table := range []string{settlementType, settlementsTable, winnersTable} {
+	for _, table := range []string{
+		settlementType,
+		settlementsTable,
+		encryptedCommitmentsTable,
+		winnersTable,
+		bidderTable,
+		transactionsTable,
+	} {
 		_, err := db.Exec(table)
 		if err != nil {
 			return nil, err
@@ -58,96 +90,78 @@ func NewStore(db *sql.DB) (*Store, error) {
 	}
 
 	return &Store{
-		db:       db,
-		winnerT:  make(chan struct{}),
-		settlerT: make(chan struct{}),
-		returnT:  make(chan struct{}),
+		db: db,
 	}, nil
 }
 
-func (s *Store) triggerWinner() {
-	select {
-	case s.winnerT <- struct{}{}:
-	default:
-	}
-}
+func (s *Store) RegisterWinner(
+	ctx context.Context,
+	blockNum int64,
+	winner []byte,
+	window int64,
+) error {
+	insertStr := "INSERT INTO winners (block_number, builder_address, settlement_window) VALUES ($1, $2, $3)"
 
-func (s *Store) triggerSettler() {
-	select {
-	case s.settlerT <- struct{}{}:
-	default:
-	}
-}
-
-func (s *Store) triggerReturn() {
-	select {
-	case s.returnT <- struct{}{}:
-	default:
-	}
-}
-
-func (s *Store) RegisterWinner(ctx context.Context, blockNum int64, winner string) error {
-	insertStr := "INSERT INTO winners (block_number, builder_address, processed) VALUES ($1, $2, $3)"
-
-	_, err := s.db.ExecContext(ctx, insertStr, blockNum, winner, false)
+	_, err := s.db.ExecContext(ctx, insertStr, blockNum, winner, window)
 	if err != nil {
 		return err
 	}
-	s.triggerWinner()
 	return nil
 }
 
-func (s *Store) SubscribeWinners(ctx context.Context) <-chan updater.BlockWinner {
-	resChan := make(chan updater.BlockWinner)
-	go func() {
-		defer close(resChan)
-
-	RETRY:
-		for {
-			results, err := s.db.QueryContext(
-				ctx,
-				"SELECT block_number, builder_address FROM winners WHERE processed = false",
-			)
-			if err != nil {
-				return
-			}
-			for results.Next() {
-				var bWinner updater.BlockWinner
-				err = results.Scan(&bWinner.BlockNumber, &bWinner.Winner)
-				if err != nil {
-					_ = results.Close()
-					continue RETRY
-				}
-				select {
-				case <-ctx.Done():
-					_ = results.Close()
-					return
-				case resChan <- bWinner:
-				}
-			}
-			_ = results.Close()
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.winnerT:
-			}
-		}
-	}()
-
-	return resChan
+func (s *Store) GetWinner(
+	ctx context.Context,
+	blockNum int64,
+) (updater.Winner, error) {
+	winner := updater.Winner{}
+	err := s.db.QueryRowContext(
+		ctx,
+		"SELECT builder_address, settlement_window FROM winners WHERE block_number = $1",
+		blockNum,
+	).Scan(&winner.Winner, &winner.Window)
+	if err != nil {
+		return winner, err
+	}
+	return winner, nil
 }
 
-func (s *Store) UpdateComplete(ctx context.Context, blockNum int64) error {
-	_, err := s.db.ExecContext(
-		ctx,
-		"UPDATE winners SET processed = true WHERE block_number = $1",
+func (s *Store) AddEncryptedCommitment(
+	ctx context.Context,
+	commitmentIdx []byte,
+	committer []byte,
+	commitmentHash []byte,
+	commitmentSignature []byte,
+	blockNum int64,
+) error {
+	columns := []string{
+		"commitment_index",
+		"committer",
+		"commitment_hash",
+		"commitment_signature",
+		"block_number",
+	}
+	values := []interface{}{
+		commitmentIdx,
+		committer,
+		commitmentHash,
+		commitmentSignature,
 		blockNum,
+	}
+	placeholder := make([]string, len(values))
+	for i := range columns {
+		placeholder[i] = fmt.Sprintf("$%d", i+1)
+	}
+
+	insertStr := fmt.Sprintf(
+		"INSERT INTO encrypted_commitments (%s) VALUES (%s)",
+		strings.Join(columns, ", "),
+		strings.Join(placeholder, ", "),
 	)
+
+	_, err := s.db.ExecContext(ctx, insertStr, values...)
 	if err != nil {
 		return err
 	}
-	s.triggerSettler()
 	return nil
 }
 
@@ -157,10 +171,11 @@ func (s *Store) AddSettlement(
 	txHash string,
 	blockNum int64,
 	amount uint64,
-	builder string,
+	builder []byte,
 	bidID []byte,
 	settlementType settler.SettlementType,
 	decayPercentage int64,
+	window int64,
 ) error {
 	columns := []string{
 		"commitment_index",
@@ -174,6 +189,7 @@ func (s *Store) AddSettlement(
 		"chainhash",
 		"nonce",
 		"decay_percentage",
+		"settlement_window",
 	}
 	values := []interface{}{
 		commitmentIdx,
@@ -187,6 +203,7 @@ func (s *Store) AddSettlement(
 		nil,
 		0,
 		decayPercentage,
+		window,
 	}
 	placeholder := make([]string, len(values))
 	for i := range columns {
@@ -206,134 +223,147 @@ func (s *Store) AddSettlement(
 	return nil
 }
 
-func (s *Store) SubscribeSettlements(ctx context.Context) <-chan settler.Settlement {
+func (s *Store) IsSettled(
+	ctx context.Context,
+	commitmentIdx []byte,
+) (bool, error) {
+	var settled bool
+	err := s.db.QueryRowContext(
+		ctx,
+		"SELECT EXISTS(SELECT 1 FROM settlements WHERE commitment_index = $1)",
+		commitmentIdx,
+	).Scan(&settled)
+	if err != nil {
+		return false, err
+	}
+
+	return settled, nil
+}
+
+func (s *Store) SubscribeSettlements(
+	ctx context.Context,
+	window int64,
+) <-chan settler.Settlement {
 	resChan := make(chan settler.Settlement)
 
 	go func() {
 		defer close(resChan)
 
-	RETRY:
-		for {
-			queryStr := `
-				SELECT commitment_index, transaction, block_number, builder_address, amount, bid_id, type, decay_percentage
+		queryStr := `
+				SELECT
+					commitment_index, transaction, block_number,
+					builder_address, amount, bid_id, type, decay_percentage
 				FROM settlements
-				WHERE settled = false AND chainhash IS NULL AND type != 'return'
+				WHERE settlement_window = $1 AND settled = false AND chainhash IS NULL AND type != 'return'
 				ORDER BY block_number ASC`
 
-			results, err := s.db.QueryContext(ctx, queryStr)
+		results, err := s.db.QueryContext(ctx, queryStr, window)
+		if err != nil {
+			return
+		}
+
+		for results.Next() {
+			var s settler.Settlement
+
+			err = results.Scan(
+				&s.CommitmentIdx,
+				&s.TxHash,
+				&s.BlockNum,
+				&s.Builder,
+				&s.Amount,
+				&s.BidID,
+				&s.Type,
+				&s.DecayPercentage,
+			)
 			if err != nil {
+				_ = results.Close()
 				return
 			}
-
-			for results.Next() {
-				var s settler.Settlement
-
-				err = results.Scan(
-					&s.CommitmentIdx,
-					&s.TxHash,
-					&s.BlockNum,
-					&s.Builder,
-					&s.Amount,
-					&s.BidID,
-					&s.Type,
-					&s.DecayPercentage,
-				)
-				if err != nil {
-					_ = results.Close()
-					continue RETRY
-				}
-
-				select {
-				case <-ctx.Done():
-					_ = results.Close()
-					return
-				case resChan <- s:
-				}
-			}
-
-			_ = results.Close()
 
 			select {
 			case <-ctx.Done():
+				_ = results.Close()
 				return
-			case <-s.settlerT:
+			case resChan <- s:
 			}
 		}
+
+		_ = results.Close()
 	}()
 
 	return resChan
 }
 
-func (s *Store) SubscribeReturns(ctx context.Context, limit int) <-chan settler.Return {
+func (s *Store) BidderRegistered(
+	ctx context.Context,
+	bidder []byte,
+	window int64,
+	amount int64,
+) error {
+	insertStr := "INSERT INTO bidders (bidder_address, settlement_window, amount) VALUES ($1, $2, $3)"
+
+	_, err := s.db.ExecContext(ctx, insertStr, bidder, window, amount)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Store) SubscribeReturns(ctx context.Context, limit int, window int64) <-chan settler.Return {
 	resChan := make(chan settler.Return)
 
 	go func() {
 		defer close(resChan)
 
-	RETRY:
-		for {
-			queryStr := `
-				SELECT DISTINCT bid_id, block_number
-				FROM settlements
-				WHERE settled = false AND chainhash IS NULL AND type = 'return'
-					AND block_number < (SELECT MAX(block_number) FROM settlements WHERE settled = true)
-				ORDER BY block_number ASC`
+		queryStr := `
+				SELECT bidder_address
+				FROM bidders
+				WHERE settlement_window = $1`
 
-			results, err := s.db.QueryContext(ctx, queryStr)
+		results, err := s.db.QueryContext(ctx, queryStr, window)
+		if err != nil {
+			return
+		}
+
+		returns := make([][]byte, 0, limit)
+
+		for results.Next() {
+			var r []byte
+			err = results.Scan(&r)
 			if err != nil {
-				fmt.Println("error", err)
+				_ = results.Close()
 				return
 			}
 
-			returns := make([][]byte, 0, limit)
-
-			copyReturns := func() [][32]byte {
-				bidIDs := make([][32]byte, len(returns))
-				for idx, bidID := range returns {
-					bidIDs[idx] = [32]byte{}
-					copy(bidIDs[idx][:], bidID)
-				}
-				return bidIDs
-			}
-
-			for results.Next() {
-				var r []byte
-				err = results.Scan(&r, new(int64))
-				if err != nil {
-					_ = results.Close()
-					continue RETRY
-				}
-
-				returns = append(returns, r)
-				if len(returns) == limit {
-					select {
-					case <-ctx.Done():
-						_ = results.Close()
-						return
-					case resChan <- settler.Return{BidIDs: copyReturns()}:
-						returns = returns[:0]
-					}
-				}
-			}
-
-			if len(returns) > 0 {
+			returns = append(returns, r)
+			if len(returns) == limit {
 				select {
 				case <-ctx.Done():
 					_ = results.Close()
 					return
-				case resChan <- settler.Return{BidIDs: copyReturns()}:
+				case resChan <- settler.Return{
+					Window:  window,
+					Bidders: returns,
+				}:
 					returns = returns[:0]
 				}
 			}
+		}
 
-			_ = results.Close()
-
+		if len(returns) > 0 {
 			select {
 			case <-ctx.Done():
+				_ = results.Close()
 				return
-			case <-s.settlerT:
+			case resChan <- settler.Return{
+				Window:  window,
+				Bidders: returns,
+			}:
 			}
 		}
+
+		_ = results.Close()
 	}()
 
 	return resChan
@@ -341,16 +371,37 @@ func (s *Store) SubscribeReturns(ctx context.Context, limit int) <-chan settler.
 
 func (s *Store) SettlementInitiated(
 	ctx context.Context,
-	bidIDs [][]byte,
+	commitmentIdx []byte,
 	txHash common.Hash,
 	nonce uint64,
 ) error {
 	_, err := s.db.ExecContext(
 		ctx,
-		"UPDATE settlements SET chainhash = $1, nonce = $2 WHERE bid_id = ANY($3::BYTEA[])",
+		"UPDATE settlements SET chainhash = $1, nonce = $2 WHERE commitment_index = $3",
 		txHash.Bytes(),
 		nonce,
-		pq.Array(bidIDs),
+		commitmentIdx,
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ReturnInitiated(
+	ctx context.Context,
+	window int64,
+	bidders [][]byte,
+	txHash common.Hash,
+	nonce uint64,
+) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		"UPDATE bidders SET chainhash = $1, nonce = $2 WHERE settlement_window = $3 AND bidder_address = ANY($4)",
+		txHash.Bytes(),
+		nonce,
+		window,
+		pq.Array(bidders),
 	)
 	if err != nil {
 		return err
@@ -359,142 +410,83 @@ func (s *Store) SettlementInitiated(
 }
 
 func (s *Store) MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error) {
-	result, err := s.db.ExecContext(
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	_, err = tx.ExecContext(
 		ctx,
 		"UPDATE settlements SET settled = true WHERE settled = false AND nonce < $1 AND chainhash IS NOT NULL",
 		nonce,
 	)
 	if err != nil {
+		_ = tx.Rollback()
 		return 0, err
 	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		"UPDATE bidders SET settled = true WHERE settled = false AND nonce < $1 AND chainhash IS NOT NULL",
+		nonce,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+
+	result, err := tx.ExecContext(
+		ctx,
+		"UPDATE sent_transactions SET settled = true WHERE settled = false AND nonce < $1",
+		nonce,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+
 	count, err := result.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+
+	err = tx.Commit()
 	if err != nil {
 		return 0, err
 	}
-	s.triggerReturn()
+
 	return int(count), nil
 }
 
 func (s *Store) LastNonce() (int64, error) {
 	var lastNonce int64
-	err := s.db.QueryRow("SELECT MAX(nonce) FROM settlements").Scan(&lastNonce)
+	err := s.db.QueryRow("SELECT MAX(nonce) FROM sent_transactions").Scan(&lastNonce)
 	if err != nil {
 		return 0, err
 	}
 	return lastNonce, nil
 }
 
+func (s *Store) SentTxn(nonce uint64, txHash common.Hash) error {
+	_, err := s.db.Exec(
+		"INSERT INTO sent_transactions (hash, nonce, settled) VALUES ($1, $2, false)",
+		txHash.Bytes(),
+		nonce,
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Store) PendingTxnCount() (int, error) {
 	var count int
 	err := s.db.QueryRow(
-		"SELECT COUNT(DISTINCT chainhash) FROM settlements WHERE chainhash IS NOT NULL AND settled = false",
+		"SELECT COUNT(*) FROM sent_transactions WHERE hash IS NOT NULL AND settled = false",
 	).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
 	return count, nil
-}
-
-type BlockInfo struct {
-	BlockNumber     int64
-	Builder         string
-	NoOfCommitments int
-	NoOfBids        int
-	TotalAmount     sql.NullString
-	NoOfRewards     int
-	TotalRewards    sql.NullString
-	NoOfSlashes     int
-	TotalSlashes    sql.NullString
-	NoOfSettlements int
-}
-
-func (s *Store) ProcessedBlocks(limit, offset int) ([]BlockInfo, error) {
-	var blocks []BlockInfo
-	rows, err := s.db.Query(`
-		SELECT
-			winners.block_number,
-			winners.builder_address,
-			COUNT(settlements.commitment_index) AS commitment_count,
-			COUNT(DISTINCT settlements.bid_id) AS bid_count,
-			(SELECT SUM(amount) FROM (
-				SELECT DISTINCT ON (bid_id) bid_id, amount
-				FROM settlements sub_settlements
-				WHERE sub_settlements.block_number = winners.block_number
-				ORDER BY bid_id, block_number
-			) AS distinct_amounts) AS total_amount,
-			COUNT(settlements.type = 'reward' OR NULL) AS reward_count,
-			SUM(settlements.amount) FILTER (WHERE settlements.type = 'reward') AS total_rewards,
-			COUNT(settlements.type = 'slash' OR NULL) AS slash_count,
-			SUM(settlements.amount) FILTER (WHERE settlements.type = 'slash') AS total_slashes,
-			COUNT(settlements.settled) FILTER (WHERE settlements.settled = true) AS settled_count
-		FROM
-			winners
-		LEFT JOIN
-			settlements ON settlements.block_number = winners.block_number
-		WHERE
-			winners.processed = true
-		GROUP BY
-			winners.block_number, winners.builder_address
-		ORDER BY
-			winners.block_number DESC
-		LIMIT $1 OFFSET $2`,
-		limit, offset,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var b BlockInfo
-		err := rows.Scan(
-			&b.BlockNumber,
-			&b.Builder,
-			&b.NoOfCommitments,
-			&b.NoOfBids,
-			&b.TotalAmount,
-			&b.NoOfRewards,
-			&b.TotalRewards,
-			&b.NoOfSlashes,
-			&b.TotalSlashes,
-			&b.NoOfSettlements,
-		)
-		if err != nil {
-			return nil, err
-		}
-		blocks = append(blocks, b)
-	}
-	return blocks, nil
-}
-
-type CommitmentStats struct {
-	TotalCount                int
-	BidCount                  int
-	RewardCount               int
-	SlashCount                int
-	SettlementsCompletedCount int
-}
-
-func (s *Store) CommitmentStats() (CommitmentStats, error) {
-	var stats CommitmentStats
-	err := s.db.QueryRow(`
-		SELECT
-			COUNT(*),
-			COUNT(DISTINCT bid_id),
-			COUNT(type = 'reward' OR NULL),
-			COUNT(type = 'slash' OR NULL),
-			COUNT(settled) FILTER (WHERE settled = true)
-		FROM
-			settlements
-	`).Scan(
-		&stats.TotalCount,
-		&stats.BidCount,
-		&stats.RewardCount,
-		&stats.SlashCount,
-		&stats.SettlementsCompletedCount,
-	)
-	if err != nil {
-		return stats, err
-	}
-	return stats, nil
 }

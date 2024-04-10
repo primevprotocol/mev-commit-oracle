@@ -2,39 +2,49 @@ package updater
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"math/big"
 	"strings"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	lru "github.com/hashicorp/golang-lru/v2"
 	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
+	"github.com/primevprotocol/mev-oracle/pkg/events"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/errgroup"
 )
 
-type BlockWinner struct {
-	BlockNumber int64
-	Winner      string
+type Winner struct {
+	Winner []byte
+	Window int64
 }
 
 type WinnerRegister interface {
-	SubscribeWinners(ctx context.Context) <-chan BlockWinner
-	UpdateComplete(ctx context.Context, blockNum int64) error
+	AddEncryptedCommitment(
+		ctx context.Context,
+		commitmentIdx []byte,
+		committer []byte,
+		commitmentHash []byte,
+		commitmentSignature []byte,
+		blockNum int64,
+	) error
+	IsSettled(ctx context.Context, commitmentIdx []byte) (bool, error)
+	GetWinner(ctx context.Context, blockNum int64) (Winner, error)
 	AddSettlement(
 		ctx context.Context,
 		commitmentIdx []byte,
 		txHash string,
 		blockNum int64,
 		amount uint64,
-		builder string,
+		builder []byte,
 		bidID []byte,
 		settlementType settler.SettlementType,
 		decayPercentage int64,
+		window int64,
 	) error
 }
 
@@ -42,24 +52,15 @@ type EVMClient interface {
 	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
 }
 
-type Oracle interface {
-	GetBuilder(builder string) (common.Address, error)
-}
-
-type Preconf interface {
-	GetCommitmentsByBlockNumber(blockNum *big.Int) ([][32]byte, error)
-	GetCommitment(commitmentIdx [32]byte) (preconf.PreConfCommitmentStorePreConfCommitment, error)
-}
-
 type Updater struct {
-	logger               *slog.Logger
-	l1Client             EVMClient
-	l2Client             EVMClient
-	winnerRegister       WinnerRegister
-	preconfClient        Preconf
-	rollupClient         Oracle
-	builderIdentityCache map[string]common.Address
-	metrics              *metrics
+	logger           *slog.Logger
+	l1Client         EVMClient
+	l2Client         EVMClient
+	winnerRegister   WinnerRegister
+	evtMgr           events.EventManager
+	l1BlockCache     *lru.Cache[uint64, map[string]int]
+	l2BlockTimeCache *lru.Cache[uint64, uint64]
+	metrics          *metrics
 }
 
 func NewUpdater(
@@ -67,19 +68,26 @@ func NewUpdater(
 	l1Client EVMClient,
 	l2Client EVMClient,
 	winnerRegister WinnerRegister,
-	rollupClient Oracle,
-	preconfClient Preconf,
-) *Updater {
-	return &Updater{
-		logger:               logger,
-		l1Client:             l1Client,
-		l2Client:             l2Client,
-		winnerRegister:       winnerRegister,
-		preconfClient:        preconfClient,
-		rollupClient:         rollupClient,
-		builderIdentityCache: make(map[string]common.Address),
-		metrics:              newMetrics(),
+	evtMgr events.EventManager,
+) (*Updater, error) {
+	l1BlockCache, err := lru.New[uint64, map[string]int](1024)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create L1 block cache: %w", err)
 	}
+	l2BlockTimeCache, err := lru.New[uint64, uint64](1024)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create L2 block time cache: %w", err)
+	}
+	return &Updater{
+		logger:           logger,
+		l1Client:         l1Client,
+		l2Client:         l2Client,
+		l1BlockCache:     l1BlockCache,
+		l2BlockTimeCache: l2BlockTimeCache,
+		winnerRegister:   winnerRegister,
+		evtMgr:           evtMgr,
+		metrics:          newMetrics(),
+	}, nil
 }
 
 func (u *Updater) Metrics() []prometheus.Collector {
@@ -89,149 +97,252 @@ func (u *Updater) Metrics() []prometheus.Collector {
 func (u *Updater) Start(ctx context.Context) <-chan struct{} {
 	doneChan := make(chan struct{})
 
+	eg, egCtx := errgroup.WithContext(ctx)
+
+	eg.Go(func() error {
+		return u.subscribeEncryptedCommitments(egCtx)
+	})
+
+	eg.Go(func() error {
+		return u.subscribeOpenedCommitments(egCtx)
+	})
+
 	go func() {
 		defer close(doneChan)
-
-	RESTART:
-		cctx, unsub := context.WithCancel(ctx)
-		winnerChan := u.winnerRegister.SubscribeWinners(cctx)
-
-		for {
-			select {
-			case <-ctx.Done():
-				unsub()
-				return
-			case winner, more := <-winnerChan:
-				if !more {
-					unsub()
-					goto RESTART
-				}
-				u.metrics.UpdaterTriggerCount.Inc()
-
-				err := func() error {
-					var err error
-					builderAddr, ok := u.builderIdentityCache[winner.Winner]
-					if !ok {
-						builderAddr, err = u.rollupClient.GetBuilder(winner.Winner)
-						if err != nil {
-							if errors.Is(err, ethereum.NotFound) {
-								u.logger.Warn("builder not registered", "builder", winner.Winner)
-								return u.winnerRegister.UpdateComplete(ctx, winner.BlockNumber)
-							}
-							return fmt.Errorf("failed to get builder address: %w", err)
-						}
-						u.builderIdentityCache[winner.Winner] = builderAddr
-					}
-
-					blk, err := u.l1Client.BlockByNumber(ctx, big.NewInt(winner.BlockNumber))
-					if err != nil {
-						return fmt.Errorf("failed to get block by number: %w", err)
-					}
-
-					txnsInBlock := make(map[string]int)
-					for posInBlock, tx := range blk.Transactions() {
-						txnsInBlock[strings.TrimPrefix(tx.Hash().Hex(), "0x")] = posInBlock
-					}
-
-					commitmentIndexes, err := u.preconfClient.GetCommitmentsByBlockNumber(
-						big.NewInt(winner.BlockNumber),
-					)
-					if err != nil {
-						return fmt.Errorf("failed to get commitments by block number: %w", err)
-					}
-
-					u.logger.Debug(
-						"commitment indexes",
-						"commitments_count", len(commitmentIndexes),
-						"txns_count", len(txnsInBlock),
-						"blockNumber", winner.BlockNumber,
-					)
-
-					total, rewards, slashes := 0, 0, 0
-					for _, index := range commitmentIndexes {
-						commitment, err := u.preconfClient.GetCommitment(index)
-						if err != nil {
-							return fmt.Errorf("failed to get commitment: %w", err)
-						}
-
-						l2Block, err := u.l2Client.BlockByNumber(ctx, commitment.BlockCommitedAt)
-						if err != nil {
-							return fmt.Errorf("failed to get L2 Block: %w", err)
-						}
-						decayPercentage := computeDecayPercentage(commitment.DecayStartTimeStamp, commitment.DecayEndTimeStamp, l2Block.Header().Time)
-
-						settlementType := settler.SettlementTypeReturn
-
-						if commitment.Commiter.Cmp(builderAddr) == 0 {
-							commitmentTxnHashes := strings.Split(commitment.TxnHash, ",")
-							settlementType = settler.SettlementTypeReward
-
-							// Ensure Bundle is atomic and present in the block
-							for i := 0; i < len(commitmentTxnHashes); i++ {
-								posInBlock, found := txnsInBlock[commitmentTxnHashes[i]]
-								if !found || posInBlock != txnsInBlock[commitmentTxnHashes[0]]+i {
-									settlementType = settler.SettlementTypeSlash
-									break
-								}
-							}
-						}
-
-						err = u.winnerRegister.AddSettlement(
-							ctx,
-							index[:],
-							commitment.TxnHash,
-							winner.BlockNumber,
-							commitment.Bid,
-							commitment.Commiter.Hex(),
-							commitment.CommitmentHash[:],
-							settlementType,
-							decayPercentage,
-						)
-						if err != nil {
-							return fmt.Errorf("failed to add settlement: %w", err)
-						}
-
-						total++
-						switch settlementType {
-						case settler.SettlementTypeSlash:
-							slashes++
-						case settler.SettlementTypeReward:
-							rewards++
-						}
-					}
-
-					err = u.winnerRegister.UpdateComplete(ctx, winner.BlockNumber)
-					if err != nil {
-						return fmt.Errorf("failed to update completion of block updates: %w", err)
-					}
-
-					u.metrics.CommitmentsCount.Add(float64(total))
-					u.metrics.RewardsCount.Add(float64(rewards))
-					u.metrics.SlashesCount.Add(float64(slashes))
-					u.metrics.BlockCommitmentsCount.Inc()
-
-					u.logger.Info(
-						"added settlements",
-						"total", total,
-						"rewards", rewards,
-						"slashes", slashes,
-						"blockNumber", winner.BlockNumber,
-						"winner", winner.Winner,
-					)
-
-					return nil
-				}()
-
-				if err != nil {
-					u.logger.Error("failed to process settlements", "blockNumber", winner.BlockNumber, "winner", winner.Winner, "error", err)
-					unsub()
-					goto RESTART
-				}
-			}
+		if err := eg.Wait(); err != nil {
+			u.logger.Error("failed to start updater", "error", err)
 		}
 	}()
 
 	return doneChan
+}
+
+func (u *Updater) subscribeEncryptedCommitments(ctx context.Context) error {
+	ev := events.NewEventHandler(
+		"EncryptedCommitmentStored",
+		func(update *preconf.PreconfcommitmentstoreEncryptedCommitmentStored) error {
+			err := u.winnerRegister.AddEncryptedCommitment(
+				ctx,
+				update.CommitmentIndex[:],
+				update.Commiter.Bytes(),
+				update.CommitmentDigest[:],
+				update.CommitmentSignature,
+				update.BlockCommitedAt.Int64(),
+			)
+			if err != nil {
+				u.logger.Error(
+					"failed to add encrypted commitment",
+					"commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]),
+					"error", err,
+				)
+				return err
+			}
+			u.metrics.EncryptedCommitmentsCount.Inc()
+			return nil
+		},
+	)
+
+	sub, err := u.evtMgr.Subscribe(ev)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to encrypted commitments: %w", err)
+	}
+	defer sub.Unsubscribe()
+
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-sub.Err():
+		return err
+	}
+}
+
+func (u *Updater) subscribeOpenedCommitments(ctx context.Context) error {
+	ev := events.NewEventHandler(
+		"CommitmentStored",
+		func(update *preconf.PreconfcommitmentstoreCommitmentStored) error {
+			alreadySettled, err := u.winnerRegister.IsSettled(ctx, update.CommitmentIndex[:])
+			if err != nil {
+				u.logger.Error(
+					"failed to check if commitment is settled",
+					"commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]),
+					"error", err,
+				)
+				return err
+			}
+			if alreadySettled {
+				// both bidders and providers could open commitments, so this could
+				// be a duplicate event
+				return nil
+			}
+
+			winner, err := u.winnerRegister.GetWinner(ctx, int64(update.BlockNumber))
+			if err != nil {
+				u.logger.Error(
+					"failed to get winner",
+					"blockNumber", update.BlockCommitedAt.Int64(),
+					"error", err,
+				)
+				return err
+			}
+
+			if common.BytesToAddress(winner.Winner).Cmp(update.Commiter) != 0 {
+				// The winner is not the committer of the commitment
+				u.logger.Info(
+					"winner is not the committer",
+					"commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]),
+					"winner", winner.Winner,
+					"committer", update.Commiter.Hex(),
+				)
+				return nil
+			}
+
+			txns, err := u.getL1Txns(ctx, update.BlockNumber)
+			if err != nil {
+				u.logger.Error(
+					"failed to get L1 txns",
+					"blockNumber", update.BlockNumber,
+					"error", err,
+				)
+				return err
+			}
+
+			commitmentTxnHashes := strings.Split(update.TxnHash, ",")
+			// Ensure Bundle is atomic and present in the block
+			for i := 0; i < len(commitmentTxnHashes); i++ {
+				posInBlock, found := txns[commitmentTxnHashes[i]]
+				if !found || posInBlock != txns[commitmentTxnHashes[0]]+i {
+					u.logger.Info(
+						"bundle is not atomic",
+						"commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]),
+						"txnHash", update.TxnHash,
+					)
+					// The committer did not include the transactions in the block
+					// correctly, so this is a slash to be processed
+					return u.addSettlement(
+						ctx,
+						update,
+						settler.SettlementTypeSlash,
+						0,
+						winner.Window,
+					)
+				}
+			}
+
+			// Add the commitment as a reward
+			// Compute the decay percentage
+			l2BlockTime, err := u.getL2BlockTime(ctx, update.BlockCommitedAt.Uint64())
+			if err != nil {
+				u.logger.Error(
+					"failed to get L2 block time",
+					"blockNumber", update.BlockCommitedAt.Int64(),
+					"error", err,
+				)
+				return err
+			}
+
+			decayPercentage := computeDecayPercentage(
+				update.DecayStartTimeStamp,
+				update.DecayEndTimeStamp,
+				l2BlockTime,
+			)
+
+			return u.addSettlement(
+				ctx,
+				update,
+				settler.SettlementTypeReward,
+				decayPercentage,
+				winner.Window,
+			)
+		},
+	)
+
+	sub, err := u.evtMgr.Subscribe(ev)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to opened commitments: %w", err)
+	}
+	defer sub.Unsubscribe()
+
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-sub.Err():
+		return err
+	}
+}
+
+func (u *Updater) addSettlement(
+	ctx context.Context,
+	update *preconf.PreconfcommitmentstoreCommitmentStored,
+	settlementType settler.SettlementType,
+	decayPercentage int64,
+	window int64,
+) error {
+	err := u.winnerRegister.AddSettlement(
+		ctx,
+		update.CommitmentIndex[:],
+		update.TxnHash,
+		int64(update.BlockNumber),
+		update.Bid,
+		update.Commiter.Bytes(),
+		update.CommitmentHash[:],
+		settlementType,
+		decayPercentage,
+		window,
+	)
+	if err != nil {
+		u.logger.Error(
+			"failed to add settlement",
+			"commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]),
+			"error", err,
+		)
+		return err
+	}
+
+	u.metrics.CommitmentsCount.Inc()
+	switch settlementType {
+	case settler.SettlementTypeReward:
+		u.metrics.RewardsCount.Inc()
+	case settler.SettlementTypeSlash:
+		u.metrics.SlashesCount.Inc()
+	}
+
+	return nil
+}
+
+func (u *Updater) getL1Txns(ctx context.Context, blockNum uint64) (map[string]int, error) {
+	txns, ok := u.l1BlockCache.Get(blockNum)
+	if ok {
+		return txns, nil
+	}
+
+	blk, err := u.l1Client.BlockByNumber(ctx, big.NewInt(0).SetUint64(blockNum))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block by number: %w", err)
+	}
+
+	txnsInBlock := make(map[string]int)
+	for posInBlock, tx := range blk.Transactions() {
+		txnsInBlock[strings.TrimPrefix(tx.Hash().Hex(), "0x")] = posInBlock
+	}
+	_ = u.l1BlockCache.Add(blockNum, txnsInBlock)
+
+	return txnsInBlock, nil
+}
+
+func (u *Updater) getL2BlockTime(ctx context.Context, blockNum uint64) (uint64, error) {
+	time, ok := u.l2BlockTimeCache.Get(blockNum)
+	if ok {
+		return time, nil
+	}
+
+	blk, err := u.l2Client.BlockByNumber(ctx, big.NewInt(0).SetUint64(blockNum))
+	if err != nil {
+		return 0, fmt.Errorf("failed to get block by number: %w", err)
+	}
+
+	_ = u.l2BlockTimeCache.Add(blockNum, blk.Header().Time)
+
+	return blk.Header().Time, nil
 }
 
 // computeDecayPercentage takes startTimestamp, endTimestamp, commitTimestamp and computes a linear decay percentage

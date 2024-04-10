@@ -2,51 +2,43 @@ package settler_test
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
-	"path"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
+	bidderregistry "github.com/primevprotocol/contracts-abi/clients/BidderRegistry"
+	blocktracker "github.com/primevprotocol/contracts-abi/clients/BlockTracker"
+	"github.com/primevprotocol/mev-oracle/pkg/events"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 )
 
 type testRegister struct {
-	currentNonce         atomic.Int64
-	pendingTxns          atomic.Int32
-	settlementChan       chan settler.Settlement
-	returnsChan          chan settler.Return
-	mu                   sync.Mutex
-	settlementsInitiated [][]byte
-	settlementsCompleted atomic.Int32
+	windowSettlements    map[int64][]settler.Settlement
+	windowReturns        map[int64][]settler.Return
+	settlementsInitiated atomic.Int32
+	returnsInitiated     atomic.Int32
+	bidderChan           chan registeredBidder
 }
 
-func (t *testRegister) LastNonce() (int64, error) {
-	return t.currentNonce.Load(), nil
-}
-
-func (t *testRegister) PendingTxnCount() (int, error) {
-	return int(t.pendingTxns.Load()), nil
-}
-
-func (t *testRegister) SubscribeSettlements(ctx context.Context) <-chan settler.Settlement {
+func (t *testRegister) SubscribeSettlements(ctx context.Context, window int64) <-chan settler.Settlement {
 	sc := make(chan settler.Settlement)
 	go func() {
-		for {
+		defer close(sc)
+		settlements := t.windowSettlements[window]
+		for _, s := range settlements {
 			select {
 			case <-ctx.Done():
 				return
-			case s := <-t.settlementChan:
-				sc <- s
+			case sc <- s:
 			}
 		}
 	}()
@@ -54,15 +46,16 @@ func (t *testRegister) SubscribeSettlements(ctx context.Context) <-chan settler.
 	return sc
 }
 
-func (t *testRegister) SubscribeReturns(ctx context.Context, _ int) <-chan settler.Return {
+func (t *testRegister) SubscribeReturns(ctx context.Context, _ int, window int64) <-chan settler.Return {
 	rc := make(chan settler.Return)
 	go func() {
-		for {
+		defer close(rc)
+		returns := t.windowReturns[window]
+		for _, r := range returns {
 			select {
 			case <-ctx.Done():
 				return
-			case r := <-t.returnsChan:
-				rc <- r
+			case rc <- r:
 			}
 		}
 	}()
@@ -70,167 +63,85 @@ func (t *testRegister) SubscribeReturns(ctx context.Context, _ int) <-chan settl
 	return rc
 }
 
-func (t *testRegister) SettlementInitiated(ctx context.Context, commitmentIdx [][]byte, txHash common.Hash, nonce uint64) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+type registeredBidder struct {
+	bidder []byte
+	amount int64
+	window int64
+}
 
-	t.settlementsInitiated = append(t.settlementsInitiated, commitmentIdx...)
+func (t *testRegister) BidderRegistered(ctx context.Context, bidder []byte, window int64, amount int64) error {
+	t.bidderChan <- registeredBidder{
+		bidder: bidder,
+		amount: amount,
+		window: window,
+	}
 	return nil
 }
 
-func (t *testRegister) MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error) {
-	t.settlementsCompleted.Store(int32(nonce))
-	return 1, nil
+func (t *testRegister) ReturnInitiated(
+	ctx context.Context,
+	window int64,
+	bidders [][]byte,
+	txHash common.Hash,
+	nonce uint64,
+) error {
+	t.returnsInitiated.Add(1)
+	return nil
 }
 
-func (t *testRegister) settlementsInitiatedCount() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+func (t *testRegister) SettlementInitiated(
+	ctx context.Context,
+	commitmentIdx []byte,
+	txHash common.Hash,
+	nonce uint64,
+) error {
+	t.settlementsInitiated.Add(1)
+	return nil
+}
 
-	return len(t.settlementsInitiated)
+type processedCommitment struct {
+	commitmentIdx [32]byte
+	blockNum      *big.Int
+	builder       string
+	isSlash       bool
+	residualDecay *big.Int
 }
 
 type testOracle struct {
-	key            *ecdsa.PrivateKey
-	mu             sync.Mutex
-	commitmentIdxs [][32]byte
-	bidIDs         [][32]byte
-	slashCount     atomic.Int32
-	rewardCount    atomic.Int32
+	commitments chan processedCommitment
+	returns     chan common.Address
 }
 
 func (t *testOracle) ProcessBuilderCommitmentForBlockNumber(
-	opts *bind.TransactOpts,
 	commitmentIdx [32]byte,
 	blockNum *big.Int,
 	builder string,
 	isSlash bool,
 	residualDecay *big.Int,
 ) (*types.Transaction, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if isSlash {
-		t.slashCount.Add(1)
-	} else {
-		t.rewardCount.Add(1)
+	t.commitments <- processedCommitment{
+		commitmentIdx: commitmentIdx,
+		blockNum:      blockNum,
+		builder:       builder,
+		isSlash:       isSlash,
+		residualDecay: residualDecay,
 	}
-
-	t.commitmentIdxs = append(t.commitmentIdxs, commitmentIdx)
-	return types.MustSignNewTx(
-		t.key,
-		types.NewLondonSigner(big.NewInt(1)),
-		&types.DynamicFeeTx{
-			Nonce:     opts.Nonce.Uint64(),
-			GasTipCap: opts.GasTipCap,
-			GasFeeCap: opts.GasFeeCap,
-		},
-	), nil
+	return types.NewTransaction(0, common.Address{}, nil, 0, nil, nil), nil
 }
 
-func (t *testOracle) UnlockFunds(opts *bind.TransactOpts, bidIDs [][32]byte) (*types.Transaction, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.bidIDs = append(t.bidIDs, bidIDs...)
-	return types.MustSignNewTx(
-		t.key,
-		types.NewLondonSigner(big.NewInt(1)),
-		&types.DynamicFeeTx{
-			Nonce:     opts.Nonce.Uint64(),
-			GasTipCap: opts.GasTipCap,
-			GasFeeCap: opts.GasFeeCap,
-		},
-	), nil
-}
-
-func (t *testOracle) commitmentIdxsCount() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	return len(t.commitmentIdxs)
-}
-
-func (t *testOracle) bidIDsCount() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	return len(t.bidIDs)
-}
-
-type testTransactor struct {
-	currentNonce       atomic.Uint64
-	currentBlockNumber atomic.Uint64
-}
-
-func (t *testTransactor) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
-	return t.currentNonce.Load() + 1, nil
-}
-
-func (t *testTransactor) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
-	return big.NewInt(1000), nil
-}
-
-func (t *testTransactor) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
-	return big.NewInt(1000), nil
-}
-
-func (t *testTransactor) NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error) {
-	return t.currentNonce.Load(), nil
-}
-
-func (t *testTransactor) BlockNumber(ctx context.Context) (uint64, error) {
-	return t.currentBlockNumber.Load(), nil
-}
-
-func waitForCount(dur time.Duration, expected int, f func() int) error {
-	start := time.Now()
-	for {
-		if f() == expected {
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-		if time.Since(start) > dur {
-			return fmt.Errorf("expected count %d, got %d", expected, f())
-		}
+func (t *testOracle) UnlockFunds(_ *big.Int, bidders []common.Address) (*types.Transaction, error) {
+	for _, bidder := range bidders {
+		t.returns <- bidder
 	}
+	return types.NewTransaction(0, common.Address{}, nil, 0, nil, nil), nil
 }
 
 func TestSettler(t *testing.T) {
 	t.Parallel()
 
-	ks, err := keysigner.NewPrivateKeySigner(path.Join(t.TempDir(), "key"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ownerAddr := common.HexToAddress("0xabcd")
+	settlements := make(map[int64][]settler.Settlement)
+	returns := make(map[int64][]settler.Return)
 
-	key, err := ks.GetPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	orcl := &testOracle{key: key}
-	reg := &testRegister{
-		settlementChan: make(chan settler.Settlement),
-		returnsChan:    make(chan settler.Return),
-	}
-	transactor := &testTransactor{}
-
-	s := settler.NewSettler(
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		ks,
-		big.NewInt(1000),
-		ownerAddr,
-		orcl,
-		reg,
-		transactor,
-	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := s.Start(ctx)
-
-	// Test that the settler is able to process a settlement
 	for i := 0; i < 10; i++ {
 		var sType settler.SettlementType
 		if i%2 == 0 {
@@ -238,88 +149,216 @@ func TestSettler(t *testing.T) {
 		} else {
 			sType = settler.SettlementTypeSlash
 		}
-		reg.settlementChan <- settler.Settlement{
+		settlements[100] = append(settlements[100], settler.Settlement{
 			CommitmentIdx: big.NewInt(int64(i + 1)).Bytes(),
 			TxHash:        "0x1234",
 			BlockNum:      100,
-			Builder:       "0x1234",
+			Builder:       common.HexToAddress("0x1234").Bytes(),
 			Amount:        1000,
 			BidID:         common.HexToHash(fmt.Sprintf("0x%02d", i)).Bytes(),
 			Type:          sType,
-		}
+		})
 
-		if err := waitForCount(5*time.Second, i+1, orcl.commitmentIdxsCount); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := waitForCount(5*time.Second, i+1, reg.settlementsInitiatedCount); err != nil {
-			t.Fatal(err)
-		}
-
-		reg.currentNonce.Add(1)
+		returns[99] = append(returns[99], settler.Return{
+			Window:  99,
+			Bidders: [][]byte{common.HexToAddress("0x1234").Bytes()},
+		})
 	}
 
-	if reg.settlementsCompleted.Load() != 0 {
-		t.Fatalf("expected 0 settlements completed, got %d", reg.settlementsCompleted.Load())
+	orcl := &testOracle{
+		commitments: make(chan processedCommitment, 10),
+		returns:     make(chan common.Address, 10),
+	}
+	reg := &testRegister{
+		windowSettlements: settlements,
+		windowReturns:     returns,
+		bidderChan:        make(chan registeredBidder, 1),
 	}
 
-	if orcl.slashCount.Load() != 5 {
-		t.Fatalf("expected 5 slashes, got %d", orcl.slashCount.Load())
-	}
-
-	if orcl.rewardCount.Load() != 5 {
-		t.Fatalf("expected 5 rewards, got %d", orcl.rewardCount.Load())
-	}
-
-	transactor.currentNonce.Store(10)
-	transactor.currentBlockNumber.Store(1)
-
-	if err := waitForCount(5*time.Second, 10, func() int {
-		return int(reg.settlementsCompleted.Load())
-	}); err != nil {
+	btABI, err := abi.JSON(strings.NewReader(blocktracker.BlocktrackerABI))
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	returns := settler.Return{}
+	bidderABI, err := abi.JSON(strings.NewReader(bidderregistry.BidderregistryABI))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	em := &testEventManager{
+		btABI:     &btABI,
+		bidderABI: &bidderABI,
+		windowSub: make(chan struct{}),
+		bidderSub: make(chan struct{}),
+		sub:       &testSub{errC: make(chan error)},
+	}
+
+	s := settler.NewSettler(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		orcl,
+		reg,
+		em,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := s.Start(ctx)
+
+	<-em.windowSub
+	<-em.bidderSub
 
 	for i := 0; i < 10; i++ {
-		returns.BidIDs = append(returns.BidIDs, common.HexToHash(fmt.Sprintf("0x%02d", i)))
-	}
-	reg.returnsChan <- returns
+		// Test that the settler is able to process a bidder registration
+		b := bidderregistry.BidderregistryBidderRegistered{
+			Bidder:        common.HexToAddress(fmt.Sprintf("0x%02d", i)),
+			PrepaidAmount: big.NewInt(1000),
+			WindowNumber:  big.NewInt(99),
+		}
+		if err := em.publishBidderRegistered(b); err != nil {
+			t.Fatal(err)
+		}
 
-	if err := waitForCount(5*time.Second, 20, reg.settlementsInitiatedCount); err != nil {
+		select {
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for bidder registration")
+		case r := <-reg.bidderChan:
+			if r.amount != 1000 {
+				t.Fatalf("expected amount 1000, got %d", r.amount)
+			}
+			if r.window != 99 {
+				t.Fatalf("expected window 99, got %d", r.window)
+			}
+		}
+	}
+
+	// Test that the settler is able to process a window
+	w := blocktracker.BlocktrackerNewWindow{
+		Window: big.NewInt(102),
+	}
+	if err := em.publishNewWindow(w); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := waitForCount(5*time.Second, 10, orcl.bidIDsCount); err != nil {
-		t.Fatal(err)
-	}
+	for i := 0; i < 10; i++ {
+		select {
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for commitment")
+		case s := <-orcl.commitments:
+			if s.blockNum.Cmp(big.NewInt(100)) != 0 {
+				t.Fatalf("expected block number 100, got %d", s.blockNum)
+			}
+			if common.HexToAddress(s.builder).Cmp(common.HexToAddress("0x1234")) != 0 {
+				t.Fatalf(
+					"expected builder %s, got %s",
+					common.HexToAddress("0x1234"),
+					common.HexToAddress(s.builder),
+				)
+			}
+			if s.isSlash && i%2 == 0 {
+				t.Fatalf("expected slash, got reward")
+			}
+			if !s.isSlash && i%2 != 0 {
+				t.Fatalf("expected reward, got slash")
+			}
+		}
 
-	transactor.currentNonce.Store(11)
-	transactor.currentBlockNumber.Store(2)
-
-	if err := waitForCount(5*time.Second, 11, func() int {
-		return int(reg.settlementsCompleted.Load())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	reg.pendingTxns.Store(129)
-
-	reg.settlementChan <- settler.Settlement{
-		CommitmentIdx: big.NewInt(11).Bytes(),
-		TxHash:        "0x1234",
-		BlockNum:      100,
-		Builder:       "0x1234",
-		Amount:        1000,
-		Type:          settler.SettlementTypeReward,
-	}
-
-	time.Sleep(2 * time.Second)
-	if reg.settlementsInitiatedCount() != 20 {
-		t.Fatalf("expected 20 settlements initiated, got %d", reg.settlementsInitiatedCount())
+		select {
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for return")
+		case r := <-orcl.returns:
+			if r.Hex() != common.HexToAddress("0x1234").Hex() {
+				t.Fatalf("expected bidder 0x1234, got %s", r.Hex())
+			}
+		}
 	}
 
 	cancel()
 	<-done
+}
+
+type testEventManager struct {
+	btABI          *abi.ABI
+	bidderABI      *abi.ABI
+	mu             sync.Mutex
+	windowHandlers []events.EventHandler
+	windowSub      chan struct{}
+	bidderHandler  events.EventHandler
+	bidderSub      chan struct{}
+	sub            *testSub
+}
+
+type testSub struct {
+	errC chan error
+}
+
+func (t *testSub) Unsubscribe() {}
+
+func (t *testSub) Err() <-chan error {
+	return t.errC
+}
+
+func (t *testEventManager) Subscribe(evt events.EventHandler) (events.Subscription, error) {
+	switch evt.EventName() {
+	case "NewWindow":
+		t.mu.Lock()
+		evt.SetTopicAndContract(t.btABI.Events["NewWindow"].ID, t.btABI)
+		t.windowHandlers = append(t.windowHandlers, evt)
+		t.mu.Unlock()
+		if len(t.windowHandlers) == 2 {
+			close(t.windowSub)
+		}
+	case "BidderRegistered":
+		evt.SetTopicAndContract(t.bidderABI.Events["BidderRegistered"].ID, t.bidderABI)
+		t.bidderHandler = evt
+		close(t.bidderSub)
+	default:
+		return nil, fmt.Errorf("event %s not found", evt.EventName())
+	}
+
+	return t.sub, nil
+}
+
+func (t *testEventManager) publishNewWindow(w blocktracker.BlocktrackerNewWindow) error {
+	event := t.btABI.Events["NewWindow"]
+
+	// Creating a Log object
+	testLog := types.Log{
+		Topics: []common.Hash{
+			event.ID,                   // The first topic is the hash of the event signature
+			common.BigToHash(w.Window), // The next topics are the indexed event parameters
+		},
+		// Non-indexed parameters are stored in the Data field
+		Data: nil,
+	}
+
+	for _, h := range t.windowHandlers {
+		if err := h.Handle(testLog); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (t *testEventManager) publishBidderRegistered(c bidderregistry.BidderregistryBidderRegistered) error {
+	event := t.bidderABI.Events["BidderRegistered"]
+	buf, err := event.Inputs.NonIndexed().Pack(
+		c.PrepaidAmount,
+		c.WindowNumber,
+	)
+	if err != nil {
+		return err
+	}
+
+	bidder := common.HexToHash(c.Bidder.Hex())
+
+	// Creating a Log object
+	testLog := types.Log{
+		Topics: []common.Hash{
+			event.ID, // The first topic is the hash of the event signature
+			bidder,   // The next topics are the indexed event parameters
+		},
+		Data: buf,
+	}
+
+	return t.bidderHandler.Handle(testLog)
 }

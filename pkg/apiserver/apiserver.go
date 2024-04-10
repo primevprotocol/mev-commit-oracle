@@ -3,13 +3,11 @@ package apiserver
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"expvar"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/pprof"
-	"strconv"
 	"time"
 
 	"github.com/primevprotocol/mev-oracle/pkg/store"
@@ -42,7 +40,6 @@ func New(logger *slog.Logger, st *store.Store) *Service {
 	}
 
 	srv.registerDebugEndpoints()
-	srv.registerStatsEndpoints()
 	return srv
 }
 
@@ -66,69 +63,6 @@ func (s *Service) registerDebugEndpoints() {
 	s.router.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
 	s.router.Handle("/debug/pprof/{profile}", http.HandlerFunc(pprof.Index))
 	s.router.Handle("/debug/vars", expvar.Handler())
-}
-
-func (s *Service) registerStatsEndpoints() {
-	s.router.HandleFunc("/processed_blocks", func(w http.ResponseWriter, r *http.Request) {
-		pg := r.URL.Query().Get("page")
-		lim := r.URL.Query().Get("limit")
-
-		page, limit := 0, 10
-		if pg != "" {
-			if pgInt, err := strconv.Atoi(pg); err == nil {
-				page = pgInt
-			}
-		}
-		if lim != "" {
-			if limInt, err := strconv.Atoi(lim); err == nil {
-				limit = limInt
-			}
-		}
-
-		blocks, err := s.storage.ProcessedBlocks(limit, page)
-		if err != nil {
-			s.logger.Error("failed to get processed blocks", "error", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		resp, err := json.Marshal(blocks)
-		if err != nil {
-			s.logger.Error("failed to marshal processed blocks", "error", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write(resp)
-		if err != nil {
-			s.logger.Error("failed to write response", "error", err)
-		}
-	})
-
-	s.router.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		stats, err := s.storage.CommitmentStats()
-		if err != nil {
-			s.logger.Error("failed to get stats", "error", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		resp, err := json.Marshal(stats)
-		if err != nil {
-			s.logger.Error("failed to marshal stats", "error", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write(resp)
-		if err != nil {
-			s.logger.Error("failed to write response", "error", err)
-		}
-	})
 }
 
 func newMetrics() (r *prometheus.Registry) {

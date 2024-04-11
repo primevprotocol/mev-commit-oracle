@@ -125,13 +125,6 @@ func NewNode(opts *Options) (*Node, error) {
 		listenerL1Client = &laggerdL1Client{EthClient: listenerL1Client, amount: opts.LaggerdMode}
 	}
 
-	oracleContract, err := rollupclient.NewOracle(opts.OracleContractAddr, settlementClient)
-	if err != nil {
-		nd.logger.Error("failed to instantiate oracle contract", "error", err)
-		cancel()
-		return nil, err
-	}
-
 	callOpts := bind.CallOpts{
 		Pending: false,
 		From:    owner,
@@ -148,26 +141,6 @@ func NewNode(opts *Options) (*Node, error) {
 	oracleCallerSession := &rollupclient.OracleCallerSession{
 		Contract: oracleCaller,
 		CallOpts: callOpts,
-	}
-
-	if opts.OverrideWinners != nil && len(opts.OverrideWinners) > 0 {
-		listenerL1Client = &winnerOverrideL1Client{EthClient: listenerL1Client, winners: opts.OverrideWinners}
-		for _, winner := range opts.OverrideWinners {
-			err := setBuilderMapping(
-				ctx,
-				opts.KeySigner,
-				chainID,
-				settlementClient,
-				oracleContract,
-				winner,
-				winner,
-			)
-			if err != nil {
-				nd.logger.Error("failed to set builder mapping", "error", err)
-				cancel()
-				return nil, err
-			}
-		}
 	}
 
 	blockTracker, err := blocktracker.NewBlocktrackerTransactor(
@@ -202,6 +175,29 @@ func NewNode(opts *Options) (*Node, error) {
 		TransactOpts: *tOpts,
 	}
 
+	oracleTransactorSession := &rollupclient.OracleTransactorSession{
+		Contract:     oracleTransactor,
+		TransactOpts: *tOpts,
+	}
+
+	if opts.OverrideWinners != nil && len(opts.OverrideWinners) > 0 {
+		listenerL1Client = &winnerOverrideL1Client{EthClient: listenerL1Client, winners: opts.OverrideWinners}
+		for _, winner := range opts.OverrideWinners {
+			err := setBuilderMapping(
+				ctx,
+				oracleTransactorSession,
+				settlementClient,
+				winner,
+				winner,
+			)
+			if err != nil {
+				nd.logger.Error("failed to set builder mapping", "error", err)
+				cancel()
+				return nil, err
+			}
+		}
+	}
+
 	l1Lis := l1Listener.NewL1Listener(
 		nd.logger.With("component", "l1_listener"),
 		listenerL1Client,
@@ -226,11 +222,6 @@ func NewNode(opts *Options) (*Node, error) {
 	}
 
 	updtrClosed := updtr.Start(ctx)
-
-	oracleTransactorSession := &rollupclient.OracleTransactorSession{
-		Contract:     oracleTransactor,
-		TransactOpts: *tOpts,
-	}
 
 	settlr := settler.NewSettler(
 		nd.logger.With("component", "settler"),
@@ -368,39 +359,12 @@ func (w *winnerOverrideL1Client) HeaderByNumber(ctx context.Context, number *big
 
 func setBuilderMapping(
 	ctx context.Context,
-	keySigner keysigner.KeySigner,
-	chainID *big.Int,
+	oracle *rollupclient.OracleTransactorSession,
 	client *ethclient.Client,
-	rc *rollupclient.Oracle,
 	builderName string,
 	builderAddress string,
 ) error {
-	auth, err := keySigner.GetAuth(chainID)
-	if err != nil {
-		return err
-	}
-	nonce, err := client.PendingNonceAt(ctx, auth.From)
-	if err != nil {
-		return err
-	}
-	auth.Nonce = big.NewInt(int64(nonce))
-
-	// Returns priority fee per gas
-	gasTip, err := client.SuggestGasTipCap(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Returns priority fee per gas + base fee per gas
-	gasPrice, err := client.SuggestGasPrice(ctx)
-	if err != nil {
-		return err
-	}
-
-	auth.GasFeeCap = gasPrice
-	auth.GasTipCap = gasTip
-
-	txn, err := rc.AddBuilderAddress(auth, builderName, common.HexToAddress(builderAddress))
+	txn, err := oracle.AddBuilderAddress(builderName, common.HexToAddress(builderAddress))
 	if err != nil {
 		return err
 	}

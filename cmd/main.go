@@ -122,6 +122,13 @@ var (
 		Value:   contracts.TestnetContracts.PreconfCommitmentStore,
 	})
 
+	optionBlockTrackerContractAddr = altsrc.NewStringFlag(&cli.StringFlag{
+		Name:    "blocktracker-contract-addr",
+		Usage:   "address of the block tracker contract",
+		EnvVars: []string{"MEV_ORACLE_BLOCKTRACKER_CONTRACT_ADDR"},
+		//Value:   contracts.TestnetContracts.BlockTracker,
+	})
+
 	optionPgHost = altsrc.NewStringFlag(&cli.StringFlag{
 		Name:    "pg-host",
 		Usage:   "PostgreSQL host",
@@ -196,6 +203,7 @@ func main() {
 		optionSettlementRPCUrl,
 		optionOracleContractAddr,
 		optionPreconfContractAddr,
+		optionBlockTrackerContractAddr,
 		optionPgHost,
 		optionPgPort,
 		optionPgUser,
@@ -264,20 +272,21 @@ func launchOracleWithConfig(c *cli.Context) error {
 	logger.Info("key signer account", "address", keySigner.GetAddress().Hex(), "url", keySigner.String())
 
 	nd, err := node.NewNode(&node.Options{
-		Logger:              logger,
-		KeySigner:           keySigner,
-		HTTPPort:            c.Int(optionHTTPPort.Name),
-		L1RPCUrl:            c.String(optionL1RPCUrl.Name),
-		SettlementRPCUrl:    c.String(optionSettlementRPCUrl.Name),
-		OracleContractAddr:  common.HexToAddress(c.String(optionOracleContractAddr.Name)),
-		PreconfContractAddr: common.HexToAddress(c.String(optionPreconfContractAddr.Name)),
-		PgHost:              c.String(optionPgHost.Name),
-		PgPort:              c.Int(optionPgPort.Name),
-		PgUser:              c.String(optionPgUser.Name),
-		PgPassword:          c.String(optionPgPassword.Name),
-		PgDbname:            c.String(optionPgDbname.Name),
-		LaggerdMode:         c.Int(optionLaggerdMode.Name),
-		OverrideWinners:     c.StringSlice(optionOverrideWinners.Name),
+		Logger:                   logger,
+		KeySigner:                keySigner,
+		HTTPPort:                 c.Int(optionHTTPPort.Name),
+		L1RPCUrl:                 c.String(optionL1RPCUrl.Name),
+		SettlementRPCUrl:         c.String(optionSettlementRPCUrl.Name),
+		OracleContractAddr:       common.HexToAddress(c.String(optionOracleContractAddr.Name)),
+		PreconfContractAddr:      common.HexToAddress(c.String(optionPreconfContractAddr.Name)),
+		BlockTrackerContractAddr: common.HexToAddress(c.String(optionBlockTrackerContractAddr.Name)),
+		PgHost:                   c.String(optionPgHost.Name),
+		PgPort:                   c.Int(optionPgPort.Name),
+		PgUser:                   c.String(optionPgUser.Name),
+		PgPassword:               c.String(optionPgPassword.Name),
+		PgDbname:                 c.String(optionPgDbname.Name),
+		LaggerdMode:              c.Int(optionLaggerdMode.Name),
+		OverrideWinners:          c.StringSlice(optionOverrideWinners.Name),
 	})
 	if err != nil {
 		return fmt.Errorf("failed starting node: %w", err)

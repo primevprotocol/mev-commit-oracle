@@ -88,27 +88,44 @@ func TestEventHandler(t *testing.T) {
 func TestEventManager(t *testing.T) {
 	t.Parallel()
 
-	b := bidderregistry.BidderregistryBidderRegistered{
-		Bidder:        common.HexToAddress("0xabcd"),
-		PrepaidAmount: big.NewInt(1000),
-		WindowNumber:  big.NewInt(99),
+	bidders := []bidderregistry.BidderregistryBidderRegistered{
+		{
+			Bidder:        common.HexToAddress("0xabcd"),
+			PrepaidAmount: big.NewInt(1000),
+			WindowNumber:  big.NewInt(99),
+		},
+		{
+			Bidder:        common.HexToAddress("0xcdef"),
+			PrepaidAmount: big.NewInt(2000),
+			WindowNumber:  big.NewInt(100),
+		},
 	}
 
-	handlerTriggered := make(chan struct{})
+	count := 0
+
+	handlerTriggered1 := make(chan struct{})
+	handlerTriggered2 := make(chan struct{})
 
 	evtHdlr := events.NewEventHandler(
 		"BidderRegistered",
 		func(ev *bidderregistry.BidderregistryBidderRegistered) error {
-			defer close(handlerTriggered)
-
-			if ev.Bidder.Hex() != b.Bidder.Hex() {
-				return fmt.Errorf("expected bidder %s, got %s", b.Bidder.Hex(), ev.Bidder.Hex())
+			if count >= len(bidders) {
+				return fmt.Errorf("unexpected event")
 			}
-			if ev.PrepaidAmount.Cmp(b.PrepaidAmount) != 0 {
-				return fmt.Errorf("expected prepaid amount %d, got %d", b.PrepaidAmount, ev.PrepaidAmount)
+			if ev.Bidder.Hex() != bidders[count].Bidder.Hex() {
+				return fmt.Errorf("expected bidder %s, got %s", bidders[count].Bidder.Hex(), ev.Bidder.Hex())
 			}
-			if ev.WindowNumber.Cmp(b.WindowNumber) != 0 {
-				return fmt.Errorf("expected window number %d, got %d", b.WindowNumber, ev.WindowNumber)
+			if ev.PrepaidAmount.Cmp(bidders[count].PrepaidAmount) != 0 {
+				return fmt.Errorf("expected prepaid amount %d, got %d", bidders[count].PrepaidAmount, ev.PrepaidAmount)
+			}
+			if ev.WindowNumber.Cmp(bidders[count].WindowNumber) != 0 {
+				return fmt.Errorf("expected window number %d, got %d", bidders[count].WindowNumber, ev.WindowNumber)
+			}
+			count++
+			if count == 1 {
+				close(handlerTriggered1)
+			} else {
+				close(handlerTriggered2)
 			}
 			return nil
 		},
@@ -119,10 +136,40 @@ func TestEventManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	data1, err := bidderABI.Events["BidderRegistered"].Inputs.NonIndexed().Pack(
+		bidders[0].PrepaidAmount,
+		bidders[0].WindowNumber,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data2, err := bidderABI.Events["BidderRegistered"].Inputs.NonIndexed().Pack(
+		bidders[1].PrepaidAmount,
+		bidders[1].WindowNumber,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	evmClient := &testEVMClient{
-		logsSub: make(chan struct{}),
-		sub: &testSub{
-			errC: make(chan error),
+		logs: []types.Log{
+			{
+				Topics: []common.Hash{
+					bidderABI.Events["BidderRegistered"].ID,
+					common.HexToHash(bidders[0].Bidder.Hex()),
+				},
+				Data:        data1,
+				BlockNumber: 1,
+			},
+			{
+				Topics: []common.Hash{
+					bidderABI.Events["BidderRegistered"].ID,
+					common.HexToHash(bidders[1].Bidder.Hex()),
+				},
+				Data:        data2,
+				BlockNumber: 2,
+			},
 		},
 	}
 
@@ -149,34 +196,22 @@ func TestEventManager(t *testing.T) {
 
 	defer sub.Unsubscribe()
 
-	<-evmClient.logsSub
-
-	data, err := bidderABI.Events["BidderRegistered"].Inputs.NonIndexed().Pack(
-		b.PrepaidAmount,
-		b.WindowNumber,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	evmClient.logs <- types.Log{
-		Topics: []common.Hash{
-			bidderABI.Events["BidderRegistered"].ID,
-			common.HexToHash(b.Bidder.Hex()),
-		},
-		Data:        data,
-		BlockNumber: 1,
-	}
+	evmClient.SetBlockNumber(1)
 
 	select {
-	case <-handlerTriggered:
-	case err := <-sub.Err():
-		t.Fatal("handler not triggered", err)
+	case <-handlerTriggered1:
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for handler to be triggered")
 	}
 
-	if b, err := store.LastBlock(); err != nil || b != 1 {
+	evmClient.SetBlockNumber(2)
+	select {
+	case <-handlerTriggered2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for handler to be triggered")
+	}
+
+	if b, err := store.LastBlock(); err != nil || b != 2 {
 		t.Fatalf("expected block number 1, got %d", store.blockNumber)
 	}
 
@@ -185,29 +220,40 @@ func TestEventManager(t *testing.T) {
 }
 
 type testEVMClient struct {
-	logs    chan<- types.Log
-	logsSub chan struct{}
-	sub     *testSub
+	mu       sync.Mutex
+	blockNum uint64
+	logs     []types.Log
 }
 
-type testSub struct {
-	errC chan error
+func (t *testEVMClient) SetBlockNumber(blockNum uint64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.blockNum = blockNum
 }
 
-func (t *testSub) Unsubscribe() {}
+func (t *testEVMClient) BlockNumber(context.Context) (uint64, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
-func (t *testSub) Err() <-chan error {
-	return t.errC
+	return t.blockNum, nil
 }
 
-func (t *testEVMClient) SubscribeFilterLogs(
+func (t *testEVMClient) FilterLogs(
 	ctx context.Context,
 	q ethereum.FilterQuery,
-	ch chan<- types.Log,
-) (ethereum.Subscription, error) {
-	defer close(t.logsSub)
-	t.logs = ch
-	return t.sub, nil
+) ([]types.Log, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	logs := make([]types.Log, 0, len(t.logs))
+	for _, log := range t.logs {
+		if log.BlockNumber >= q.FromBlock.Uint64() && log.BlockNumber <= q.ToBlock.Uint64() {
+			logs = append(logs, log)
+		}
+	}
+
+	return logs, nil
 }
 
 type testStore struct {

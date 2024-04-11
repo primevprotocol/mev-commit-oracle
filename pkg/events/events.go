@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/big"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -16,7 +17,8 @@ import (
 
 // EVMClient is an interface for interacting with an Ethereum client for event subscription.
 type EVMClient interface {
-	SubscribeFilterLogs(ctx context.Context, q ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
+	BlockNumber(ctx context.Context) (uint64, error)
+	FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
 }
 
 // ProgressStore is an interface for storing the last block number processed by the event listener.
@@ -234,38 +236,43 @@ func (l *Listener) Start(ctx context.Context) <-chan struct{} {
 			contracts = append(contracts, addr)
 		}
 
-		q := ethereum.FilterQuery{
-			FromBlock: big.NewInt(int64(lastBlock + 1)),
-			ToBlock:   nil,
-			Addresses: contracts,
-		}
-
-		logChan := make(chan types.Log)
-
-		sub, err := l.evmClient.SubscribeFilterLogs(ctx, q, logChan)
-		if err != nil {
-			l.logger.Error("failed to subscribe to logs", "error", err)
-			return
-		}
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
-				sub.Unsubscribe()
 				return
-			case err := <-sub.Err():
-				l.logger.Error("subscription error", "error", err)
-				return
-			case logMsg := <-logChan:
-				// process log
-				l.publishLogEvent(ctx, logMsg)
+			case <-ticker.C:
+				blockNumber, err := l.evmClient.BlockNumber(ctx)
+				if err != nil {
+					l.logger.Error("failed to get block number", "error", err)
+					return
+				}
 
-				if logMsg.BlockNumber > lastBlock {
-					if err := l.progressStore.SetLastBlock(logMsg.BlockNumber); err != nil {
+				if blockNumber > lastBlock {
+					q := ethereum.FilterQuery{
+						FromBlock: big.NewInt(int64(lastBlock + 1)),
+						ToBlock:   big.NewInt(int64(blockNumber)),
+						Addresses: contracts,
+					}
+
+					logs, err := l.evmClient.FilterLogs(ctx, q)
+					if err != nil {
+						l.logger.Error("failed to filter logs", "error", err)
+						return
+					}
+
+					for _, logMsg := range logs {
+						// process log
+						l.publishLogEvent(ctx, logMsg)
+					}
+
+					if err := l.progressStore.SetLastBlock(blockNumber); err != nil {
 						l.logger.Error("failed to set last block", "error", err)
 						return
 					}
-					lastBlock = logMsg.BlockNumber
+					lastBlock = blockNumber
 				}
 			}
 		}

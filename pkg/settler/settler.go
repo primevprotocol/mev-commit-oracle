@@ -14,10 +14,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var (
-	batchSize = 10
-)
-
 type SettlementType string
 
 const (

@@ -120,7 +120,7 @@ func TestL1Listener(t *testing.T) {
 				big.NewInt(int64(i)),
 			)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
 			}
 		}()
 
@@ -212,14 +212,21 @@ func (t *testEthClient) HeaderByNumber(_ context.Context, number *big.Int) (*typ
 }
 
 type testOracle struct {
+	mu         sync.Mutex
 	builderMap map[string]common.Address
 }
 
 func (t *testOracle) AddBuilder(builder string, addr common.Address) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	t.builderMap[builder] = addr
 }
 
 func (t *testOracle) GetBuilder(builder string) (common.Address, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	addr, ok := t.builderMap[builder]
 	if !ok {
 		return common.Address{}, errors.New("builder not found")
@@ -228,6 +235,7 @@ func (t *testOracle) GetBuilder(builder string) (common.Address, error) {
 }
 
 type testEventManager struct {
+	mu      sync.Mutex
 	btABI   *abi.ABI
 	handler events.EventHandler
 	sub     *testSub
@@ -244,6 +252,9 @@ func (t *testSub) Err() <-chan error {
 }
 
 func (t *testEventManager) Subscribe(evt events.EventHandler) (events.Subscription, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if evt.EventName() != "NewL1Block" {
 		return nil, errors.New("invalid event")
 	}
@@ -253,6 +264,9 @@ func (t *testEventManager) Subscribe(evt events.EventHandler) (events.Subscripti
 }
 
 func (t *testEventManager) publish(blockNum *big.Int, winner common.Address, window *big.Int) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	eventSignature := []byte("NewL1Block(uint256,address,uint256)")
 	hashEventSignature := crypto.Keccak256Hash(eventSignature)
 

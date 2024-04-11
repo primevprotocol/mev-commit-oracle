@@ -15,7 +15,7 @@ import (
 var allowedPendingTxnCount = 128
 
 type TxnStore interface {
-	LastNonce() (uint64, error)
+	LastNonce() (int64, error)
 	SentTxn(nonce uint64, txHash common.Hash) error
 	MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error)
 }
@@ -57,7 +57,7 @@ func NewContractTransactor(
 		store:     store,
 		owner:     owner,
 		logger:    logger,
-		nonce:     nonce,
+		nonce:     uint64(nonce),
 		queue:     make([]uint64, 0, allowedPendingTxnCount),
 	}
 
@@ -69,7 +69,7 @@ func NewContractTransactor(
 	return t, nil
 }
 
-func (t *transactor) txStatusUpdater(ctx context.Context) error {
+func (t *transactor) txStatusUpdater(ctx context.Context) {
 	queryTicker := time.NewTicker(500 * time.Millisecond)
 	defer queryTicker.Stop()
 
@@ -77,7 +77,7 @@ func (t *transactor) txStatusUpdater(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return
 		case <-queryTicker.C:
 		}
 

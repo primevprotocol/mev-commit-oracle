@@ -10,7 +10,6 @@ import (
 	"net/http/pprof"
 	"time"
 
-	"github.com/primevprotocol/mev-oracle/pkg/store"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -27,16 +26,14 @@ type Service struct {
 	metricsRegistry *prometheus.Registry
 	router          *http.ServeMux
 	srv             *http.Server
-	storage         *store.Store
 }
 
 // New creates a new Service.
-func New(logger *slog.Logger, st *store.Store) *Service {
+func New(logger *slog.Logger) *Service {
 	srv := &Service{
 		logger:          logger,
 		router:          http.NewServeMux(),
 		metricsRegistry: newMetrics(),
-		storage:         st,
 	}
 
 	srv.registerDebugEndpoints()

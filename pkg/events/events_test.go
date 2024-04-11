@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,7 +15,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/event"
 	bidderregistry "github.com/primevprotocol/contracts-abi/clients/BidderRegistry"
 	"github.com/primevprotocol/mev-oracle/pkg/events"
 )
@@ -176,7 +176,7 @@ func TestEventManager(t *testing.T) {
 		t.Fatal("timed out waiting for handler to be triggered")
 	}
 
-	if store.blockNumber != 1 {
+	if b, err := store.LastBlock(); err != nil || b != 1 {
 		t.Fatalf("expected block number 1, got %d", store.blockNumber)
 	}
 
@@ -200,21 +200,32 @@ func (t *testSub) Err() <-chan error {
 	return t.errC
 }
 
-func (t *testEVMClient) SubscribeFilterLogs(ctx context.Context, q ethereum.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
+func (t *testEVMClient) SubscribeFilterLogs(
+	ctx context.Context,
+	q ethereum.FilterQuery,
+	ch chan<- types.Log,
+) (ethereum.Subscription, error) {
 	defer close(t.logsSub)
 	t.logs = ch
 	return t.sub, nil
 }
 
 type testStore struct {
+	mu          sync.Mutex
 	blockNumber uint64
 }
 
 func (t *testStore) LastBlock() (uint64, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	return t.blockNumber, nil
 }
 
 func (t *testStore) SetLastBlock(blockNumber uint64) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	t.blockNumber = blockNumber
 	return nil
 }

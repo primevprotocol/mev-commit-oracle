@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -267,52 +266,6 @@ func TestStore(t *testing.T) {
 		}
 	})
 
-	t.Run("BidderRegistered", func(t *testing.T) {
-		st, err := store.NewStore(db)
-		if err != nil {
-			t.Fatalf("Failed to create store: %s", err)
-		}
-
-		err = st.BidderRegistered(
-			context.Background(),
-			common.HexToAddress("0x1234").Bytes(),
-			1,
-			1000,
-		)
-		if err != nil {
-			t.Fatalf("Failed to register bidder: %s", err)
-		}
-	})
-
-	t.Run("SubscribeReturns", func(t *testing.T) {
-		st, err := store.NewStore(db)
-		if err != nil {
-			t.Fatalf("Failed to create store: %s", err)
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-
-		returnChan := st.SubscribeReturns(ctx, 1, 1)
-
-		for r := range returnChan {
-			if !bytes.Equal(r.Bidders[0], common.HexToAddress("0x1234").Bytes()) {
-				t.Fatalf(
-					"Unexpected return settlement: want %s have %s\n",
-					common.HexToAddress("0x1234"),
-					common.BytesToAddress(r.Bidders[0]),
-				)
-			}
-		}
-
-		cancel()
-
-		returnChan = st.SubscribeReturns(ctx, 1, 1)
-		_, ok := <-returnChan
-		if ok {
-			t.Fatalf("Expected channel to be closed")
-		}
-	})
-
 	t.Run("SettlementInitiated", func(t *testing.T) {
 		st, err := store.NewStore(db)
 		if err != nil {
@@ -337,29 +290,6 @@ func TestStore(t *testing.T) {
 		}
 	})
 
-	t.Run("ReturnInitiated", func(t *testing.T) {
-		st, err := store.NewStore(db)
-		if err != nil {
-			t.Fatalf("Failed to create store: %s", err)
-		}
-
-		err = st.SentTxn(5, common.HexToHash(fmt.Sprintf("0x%02d", 5)))
-		if err != nil {
-			t.Fatalf("Failed to mark txn sent: %s", err)
-		}
-
-		err = st.ReturnInitiated(
-			context.Background(),
-			1,
-			[][]byte{common.HexToAddress("0x1234").Bytes()},
-			common.HexToHash(fmt.Sprintf("0x%02d", 5)),
-			uint64(5),
-		)
-		if err != nil {
-			t.Fatalf("Failed to initiate settlement: %s", err)
-		}
-	})
-
 	t.Run("LastNonce and PendingTxnCount", func(t *testing.T) {
 		st, err := store.NewStore(db)
 		if err != nil {
@@ -370,16 +300,16 @@ func TestStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to get last nonce: %s", err)
 		}
-		if lastNonce != 5 {
-			t.Fatalf("Expected last nonce 5, got %d", lastNonce)
+		if lastNonce != 4 {
+			t.Fatalf("Expected last nonce 4, got %d", lastNonce)
 		}
 
 		pendingTxnCount, err := st.PendingTxnCount()
 		if err != nil {
 			t.Fatalf("Failed to get pending txn count: %s", err)
 		}
-		if pendingTxnCount != 5 {
-			t.Fatalf("Expected pending txn count 5, got %d", pendingTxnCount)
+		if pendingTxnCount != 4 {
+			t.Fatalf("Expected pending txn count 4, got %d", pendingTxnCount)
 		}
 	})
 
@@ -389,12 +319,12 @@ func TestStore(t *testing.T) {
 			t.Fatalf("Failed to create store: %s", err)
 		}
 
-		count, err := st.MarkSettlementComplete(context.Background(), 6)
+		count, err := st.MarkSettlementComplete(context.Background(), 5)
 		if err != nil {
 			t.Fatalf("Failed to mark settlement complete: %s", err)
 		}
-		if count != 5 {
-			t.Fatalf("Expected count 5, got %d", count)
+		if count != 4 {
+			t.Fatalf("Expected count 4, got %d", count)
 		}
 
 		pendingTxnCount, err := st.PendingTxnCount()

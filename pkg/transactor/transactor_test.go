@@ -136,7 +136,7 @@ type testStore struct {
 	sentTxns       []uint64
 }
 
-func (t *testStore) LastNonce() (uint64, error) {
+func (t *testStore) LastNonce() (int64, error) {
 	return 0, nil
 }
 

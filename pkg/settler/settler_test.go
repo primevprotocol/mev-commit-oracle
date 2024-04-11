@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	bidderregistry "github.com/primevprotocol/contracts-abi/clients/BidderRegistry"
 	blocktracker "github.com/primevprotocol/contracts-abi/clients/BlockTracker"
 	"github.com/primevprotocol/mev-oracle/pkg/events"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
@@ -23,10 +21,7 @@ import (
 
 type testRegister struct {
 	windowSettlements    map[int64][]settler.Settlement
-	windowReturns        map[int64][]settler.Return
 	settlementsInitiated atomic.Int32
-	returnsInitiated     atomic.Int32
-	bidderChan           chan registeredBidder
 }
 
 func (t *testRegister) SubscribeSettlements(ctx context.Context, window int64) <-chan settler.Settlement {
@@ -44,49 +39,6 @@ func (t *testRegister) SubscribeSettlements(ctx context.Context, window int64) <
 	}()
 
 	return sc
-}
-
-func (t *testRegister) SubscribeReturns(ctx context.Context, _ int, window int64) <-chan settler.Return {
-	rc := make(chan settler.Return)
-	go func() {
-		defer close(rc)
-		returns := t.windowReturns[window]
-		for _, r := range returns {
-			select {
-			case <-ctx.Done():
-				return
-			case rc <- r:
-			}
-		}
-	}()
-
-	return rc
-}
-
-type registeredBidder struct {
-	bidder []byte
-	amount int64
-	window int64
-}
-
-func (t *testRegister) BidderRegistered(ctx context.Context, bidder []byte, window int64, amount int64) error {
-	t.bidderChan <- registeredBidder{
-		bidder: bidder,
-		amount: amount,
-		window: window,
-	}
-	return nil
-}
-
-func (t *testRegister) ReturnInitiated(
-	ctx context.Context,
-	window int64,
-	bidders [][]byte,
-	txHash common.Hash,
-	nonce uint64,
-) error {
-	t.returnsInitiated.Add(1)
-	return nil
 }
 
 func (t *testRegister) SettlementInitiated(
@@ -129,18 +81,10 @@ func (t *testOracle) ProcessBuilderCommitmentForBlockNumber(
 	return types.NewTransaction(0, common.Address{}, nil, 0, nil, nil), nil
 }
 
-func (t *testOracle) UnlockFunds(_ *big.Int, bidders []common.Address) (*types.Transaction, error) {
-	for _, bidder := range bidders {
-		t.returns <- bidder
-	}
-	return types.NewTransaction(0, common.Address{}, nil, 0, nil, nil), nil
-}
-
 func TestSettler(t *testing.T) {
 	t.Parallel()
 
 	settlements := make(map[int64][]settler.Settlement)
-	returns := make(map[int64][]settler.Return)
 
 	for i := 0; i < 10; i++ {
 		var sType settler.SettlementType
@@ -158,21 +102,13 @@ func TestSettler(t *testing.T) {
 			BidID:         common.HexToHash(fmt.Sprintf("0x%02d", i)).Bytes(),
 			Type:          sType,
 		})
-
-		returns[99] = append(returns[99], settler.Return{
-			Window:  99,
-			Bidders: [][]byte{common.HexToAddress("0x1234").Bytes()},
-		})
 	}
 
 	orcl := &testOracle{
 		commitments: make(chan processedCommitment, 10),
-		returns:     make(chan common.Address, 10),
 	}
 	reg := &testRegister{
 		windowSettlements: settlements,
-		windowReturns:     returns,
-		bidderChan:        make(chan registeredBidder, 1),
 	}
 
 	btABI, err := abi.JSON(strings.NewReader(blocktracker.BlocktrackerABI))
@@ -180,16 +116,9 @@ func TestSettler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bidderABI, err := abi.JSON(strings.NewReader(bidderregistry.BidderregistryABI))
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	em := &testEventManager{
 		btABI:     &btABI,
-		bidderABI: &bidderABI,
 		windowSub: make(chan struct{}),
-		bidderSub: make(chan struct{}),
 		sub:       &testSub{errC: make(chan error)},
 	}
 
@@ -204,31 +133,6 @@ func TestSettler(t *testing.T) {
 	done := s.Start(ctx)
 
 	<-em.windowSub
-	<-em.bidderSub
-
-	for i := 0; i < 10; i++ {
-		// Test that the settler is able to process a bidder registration
-		b := bidderregistry.BidderregistryBidderRegistered{
-			Bidder:        common.HexToAddress(fmt.Sprintf("0x%02d", i)),
-			PrepaidAmount: big.NewInt(1000),
-			WindowNumber:  big.NewInt(99),
-		}
-		if err := em.publishBidderRegistered(b); err != nil {
-			t.Fatal(err)
-		}
-
-		select {
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for bidder registration")
-		case r := <-reg.bidderChan:
-			if r.amount != 1000 {
-				t.Fatalf("expected amount 1000, got %d", r.amount)
-			}
-			if r.window != 99 {
-				t.Fatalf("expected window 99, got %d", r.window)
-			}
-		}
-	}
 
 	// Test that the settler is able to process a window
 	w := blocktracker.BlocktrackerNewWindow{
@@ -260,15 +164,6 @@ func TestSettler(t *testing.T) {
 				t.Fatalf("expected reward, got slash")
 			}
 		}
-
-		select {
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for return")
-		case r := <-orcl.returns:
-			if r.Hex() != common.HexToAddress("0x1234").Hex() {
-				t.Fatalf("expected bidder 0x1234, got %s", r.Hex())
-			}
-		}
 	}
 
 	cancel()
@@ -276,14 +171,10 @@ func TestSettler(t *testing.T) {
 }
 
 type testEventManager struct {
-	btABI          *abi.ABI
-	bidderABI      *abi.ABI
-	mu             sync.Mutex
-	windowHandlers []events.EventHandler
-	windowSub      chan struct{}
-	bidderHandler  events.EventHandler
-	bidderSub      chan struct{}
-	sub            *testSub
+	btABI         *abi.ABI
+	windowHandler events.EventHandler
+	windowSub     chan struct{}
+	sub           *testSub
 }
 
 type testSub struct {
@@ -297,24 +188,14 @@ func (t *testSub) Err() <-chan error {
 }
 
 func (t *testEventManager) Subscribe(evt events.EventHandler) (events.Subscription, error) {
-	switch evt.EventName() {
-	case "NewWindow":
-		t.mu.Lock()
+	if evt.EventName() == "NewWindow" {
 		evt.SetTopicAndContract(t.btABI.Events["NewWindow"].ID, t.btABI)
-		t.windowHandlers = append(t.windowHandlers, evt)
-		t.mu.Unlock()
-		if len(t.windowHandlers) == 2 {
-			close(t.windowSub)
-		}
-	case "BidderRegistered":
-		evt.SetTopicAndContract(t.bidderABI.Events["BidderRegistered"].ID, t.bidderABI)
-		t.bidderHandler = evt
-		close(t.bidderSub)
-	default:
-		return nil, fmt.Errorf("event %s not found", evt.EventName())
+		t.windowHandler = evt
+		close(t.windowSub)
+		return t.sub, nil
 	}
 
-	return t.sub, nil
+	return nil, fmt.Errorf("event %s not found", evt.EventName())
 }
 
 func (t *testEventManager) publishNewWindow(w blocktracker.BlocktrackerNewWindow) error {
@@ -330,35 +211,5 @@ func (t *testEventManager) publishNewWindow(w blocktracker.BlocktrackerNewWindow
 		Data: nil,
 	}
 
-	for _, h := range t.windowHandlers {
-		if err := h.Handle(testLog); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (t *testEventManager) publishBidderRegistered(c bidderregistry.BidderregistryBidderRegistered) error {
-	event := t.bidderABI.Events["BidderRegistered"]
-	buf, err := event.Inputs.NonIndexed().Pack(
-		c.PrepaidAmount,
-		c.WindowNumber,
-	)
-	if err != nil {
-		return err
-	}
-
-	bidder := common.HexToHash(c.Bidder.Hex())
-
-	// Creating a Log object
-	testLog := types.Log{
-		Topics: []common.Hash{
-			event.ID, // The first topic is the hash of the event signature
-			bidder,   // The next topics are the indexed event parameters
-		},
-		Data: buf,
-	}
-
-	return t.bidderHandler.Handle(testLog)
+	return t.windowHandler.Handle(testLog)
 }

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
@@ -52,22 +51,17 @@ CREATE TABLE IF NOT EXISTS winners (
 	settlement_window BIGINT
 );`
 
-var bidderTable = `
-CREATE TABLE IF NOT EXISTS bidders (
-    bidder_address BYTEA,
-    settlement_window BIGINT,
-    amount NUMERIC(24, 0),
-    chainhash BYTEA,
-    nonce BIGINT,
-    settled BOOLEAN,
-    PRIMARY KEY (bidder_address, settlement_window)
-);`
-
 var transactionsTable = `
 CREATE TABLE IF NOT EXISTS sent_transactions (
     hash BYTEA PRIMARY KEY,
     nonce BIGINT,
     settled BOOLEAN
+);`
+
+var integerTable = `
+CREATE TABLE IF NOT EXISTS integers (
+	key TEXT PRIMARY KEY,
+	value BIGINT
 );`
 
 type Store struct {
@@ -80,8 +74,8 @@ func NewStore(db *sql.DB) (*Store, error) {
 		settlementsTable,
 		encryptedCommitmentsTable,
 		winnersTable,
-		bidderTable,
 		transactionsTable,
+		integerTable,
 	} {
 		_, err := db.Exec(table)
 		if err != nil {
@@ -294,81 +288,6 @@ func (s *Store) SubscribeSettlements(
 	return resChan
 }
 
-func (s *Store) BidderRegistered(
-	ctx context.Context,
-	bidder []byte,
-	window int64,
-	amount int64,
-) error {
-	insertStr := "INSERT INTO bidders (bidder_address, settlement_window, amount) VALUES ($1, $2, $3)"
-
-	_, err := s.db.ExecContext(ctx, insertStr, bidder, window, amount)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *Store) SubscribeReturns(ctx context.Context, limit int, window int64) <-chan settler.Return {
-	resChan := make(chan settler.Return)
-
-	go func() {
-		defer close(resChan)
-
-		queryStr := `
-				SELECT bidder_address
-				FROM bidders
-				WHERE settlement_window = $1`
-
-		results, err := s.db.QueryContext(ctx, queryStr, window)
-		if err != nil {
-			return
-		}
-
-		returns := make([][]byte, 0, limit)
-
-		for results.Next() {
-			var r []byte
-			err = results.Scan(&r)
-			if err != nil {
-				_ = results.Close()
-				return
-			}
-
-			returns = append(returns, r)
-			if len(returns) == limit {
-				select {
-				case <-ctx.Done():
-					_ = results.Close()
-					return
-				case resChan <- settler.Return{
-					Window:  window,
-					Bidders: returns,
-				}:
-					returns = returns[:0]
-				}
-			}
-		}
-
-		if len(returns) > 0 {
-			select {
-			case <-ctx.Done():
-				_ = results.Close()
-				return
-			case resChan <- settler.Return{
-				Window:  window,
-				Bidders: returns,
-			}:
-			}
-		}
-
-		_ = results.Close()
-	}()
-
-	return resChan
-}
-
 func (s *Store) SettlementInitiated(
 	ctx context.Context,
 	commitmentIdx []byte,
@@ -388,27 +307,6 @@ func (s *Store) SettlementInitiated(
 	return nil
 }
 
-func (s *Store) ReturnInitiated(
-	ctx context.Context,
-	window int64,
-	bidders [][]byte,
-	txHash common.Hash,
-	nonce uint64,
-) error {
-	_, err := s.db.ExecContext(
-		ctx,
-		"UPDATE bidders SET chainhash = $1, nonce = $2 WHERE settlement_window = $3 AND bidder_address = ANY($4)",
-		txHash.Bytes(),
-		nonce,
-		window,
-		pq.Array(bidders),
-	)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (s *Store) MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -418,16 +316,6 @@ func (s *Store) MarkSettlementComplete(ctx context.Context, nonce uint64) (int, 
 	_, err = tx.ExecContext(
 		ctx,
 		"UPDATE settlements SET settled = true WHERE settled = false AND nonce < $1 AND chainhash IS NOT NULL",
-		nonce,
-	)
-	if err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-
-	_, err = tx.ExecContext(
-		ctx,
-		"UPDATE bidders SET settled = true WHERE settled = false AND nonce < $1 AND chainhash IS NOT NULL",
 		nonce,
 	)
 	if err != nil {
@@ -489,4 +377,24 @@ func (s *Store) PendingTxnCount() (int, error) {
 		return 0, err
 	}
 	return count, nil
+}
+
+func (s *Store) LastBlock() (uint64, error) {
+	var lastBlock uint64
+	err := s.db.QueryRow("SELECT value FROM integers WHERE key = 'last_block'").Scan(&lastBlock)
+	if err != nil {
+		return 0, err
+	}
+	return lastBlock, nil
+}
+
+func (s *Store) SetLastBlock(blockNum uint64) error {
+	_, err := s.db.Exec(
+		"INSERT INTO integers (key, value) VALUES ('last_block', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+		blockNum,
+	)
+	if err != nil {
+		return err
+	}
+	return nil
 }

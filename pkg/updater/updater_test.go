@@ -363,6 +363,9 @@ func TestUpdaterBundlesFailure(t *testing.T) {
 		register,
 		evtMgr,
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := updtr.Start(ctx)

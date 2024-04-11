@@ -61,7 +61,6 @@ type processedCommitment struct {
 
 type testOracle struct {
 	commitments chan processedCommitment
-	returns     chan common.Address
 }
 
 func (t *testOracle) ProcessBuilderCommitmentForBlockNumber(

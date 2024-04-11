@@ -41,8 +41,9 @@ func TestL1Listener(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventManager := &testEventManager{
-		btABI: &btABI,
-		sub:   &testSub{errC: make(chan error)},
+		btABI:      &btABI,
+		sub:        &testSub{errC: make(chan error)},
+		handlerSub: make(chan struct{}),
 	}
 	rec := &testRecorder{
 		updates: make(chan l1Update),
@@ -62,6 +63,8 @@ func TestL1Listener(t *testing.T) {
 	t.Cleanup(cl)
 
 	done := l.Start(ctx)
+
+	<-eventManager.handlerSub
 
 	for i := 1; i < 10; i++ {
 		ethClient.AddHeader(uint64(i), &types.Header{
@@ -235,10 +238,10 @@ func (t *testOracle) GetBuilder(builder string) (common.Address, error) {
 }
 
 type testEventManager struct {
-	mu      sync.Mutex
-	btABI   *abi.ABI
-	handler events.EventHandler
-	sub     *testSub
+	btABI      *abi.ABI
+	handler    events.EventHandler
+	handlerSub chan struct{}
+	sub        *testSub
 }
 
 type testSub struct {
@@ -252,21 +255,17 @@ func (t *testSub) Err() <-chan error {
 }
 
 func (t *testEventManager) Subscribe(evt events.EventHandler) (events.Subscription, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	if evt.EventName() != "NewL1Block" {
 		return nil, errors.New("invalid event")
 	}
 	evt.SetTopicAndContract(t.btABI.Events["NewL1Block"].ID, t.btABI)
 	t.handler = evt
+	close(t.handlerSub)
+
 	return t.sub, nil
 }
 
 func (t *testEventManager) publish(blockNum *big.Int, winner common.Address, window *big.Int) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	eventSignature := []byte("NewL1Block(uint256,address,uint256)")
 	hashEventSignature := crypto.Keccak256Hash(eventSignature)
 

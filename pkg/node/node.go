@@ -364,6 +364,7 @@ func setBuilderMapping(
 	builderName string,
 	builderAddress string,
 ) error {
+	fmt.Println("Setting builder mapping", builderName, builderAddress)
 	txn, err := oracle.AddBuilderAddress(builderName, common.HexToAddress(builderAddress))
 	if err != nil {
 		return err
@@ -373,6 +374,7 @@ func setBuilderMapping(
 	if err != nil {
 		return err
 	}
+	fmt.Println("Builder mapping set", builderName, builderAddress)
 
 	return nil
 }

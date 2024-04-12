@@ -161,6 +161,8 @@ func (l *L1Listener) watchL1Block(ctx context.Context) error {
 			}
 
 			winner := string(bytes.ToValidUTF8(header.Extra, []byte("�")))
+			l.logger.Info("new L1 winner", "winner", winner, "block", header.Number.Int64())
+
 			builderAddr, ok := l.builderIdentityCache[winner]
 			if !ok {
 				builderAddr, err = l.rollupClient.GetBuilder(winner)

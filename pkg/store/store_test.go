@@ -313,6 +313,34 @@ func TestStore(t *testing.T) {
 		}
 	})
 
+	t.Run("LastBlock and SetBlockNo", func(t *testing.T) {
+		st, err := store.NewStore(db)
+		if err != nil {
+			t.Fatalf("Failed to create store: %s", err)
+		}
+
+		lastBlock, err := st.LastBlock()
+		if err != nil {
+			t.Fatalf("Failed to get last block: %s", err)
+		}
+		if lastBlock != 0 {
+			t.Fatalf("Expected last block 0, got %d", lastBlock)
+		}
+
+		err = st.SetLastBlock(3)
+		if err != nil {
+			t.Fatalf("Failed to set block number: %s", err)
+		}
+
+		lastBlock, err = st.LastBlock()
+		if err != nil {
+			t.Fatalf("Failed to get last block: %s", err)
+		}
+		if lastBlock != 3 {
+			t.Fatalf("Expected last block 3, got %d", lastBlock)
+		}
+	})
+
 	t.Run("MarkSettlementComplete", func(t *testing.T) {
 		st, err := store.NewStore(db)
 		if err != nil {

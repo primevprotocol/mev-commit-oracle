@@ -380,12 +380,18 @@ func (s *Store) PendingTxnCount() (int, error) {
 }
 
 func (s *Store) LastBlock() (uint64, error) {
-	var lastBlock uint64
+	var lastBlock sql.NullInt64
 	err := s.db.QueryRow("SELECT value FROM integers WHERE key = 'last_block'").Scan(&lastBlock)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
 		return 0, err
 	}
-	return lastBlock, nil
+	if !lastBlock.Valid {
+		return 0, nil
+	}
+	return uint64(lastBlock.Int64), nil
 }
 
 func (s *Store) SetLastBlock(blockNum uint64) error {

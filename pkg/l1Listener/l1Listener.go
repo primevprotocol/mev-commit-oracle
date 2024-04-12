@@ -161,7 +161,6 @@ func (l *L1Listener) watchL1Block(ctx context.Context) error {
 			}
 
 			winner := string(bytes.ToValidUTF8(header.Extra, []byte("�")))
-			l.logger.Info("new L1 winner", "winner", winner, "block", header.Number.Int64())
 
 			builderAddr, ok := l.builderIdentityCache[winner]
 			if !ok {
@@ -179,6 +178,13 @@ func (l *L1Listener) watchL1Block(ctx context.Context) error {
 				}
 				l.builderIdentityCache[winner] = builderAddr
 			}
+
+			l.logger.Info(
+				"new L1 winner",
+				"winner", winner,
+				"block", header.Number.Int64(),
+				"builder", builderAddr.String(),
+			)
 
 			winnerPostingTxn, err := l.recorder.RecordL1Block(
 				big.NewInt(0).SetUint64(blockNum),

@@ -165,7 +165,7 @@ func (l *L1Listener) watchL1Block(ctx context.Context) error {
 			builderAddr, ok := l.builderIdentityCache[winner]
 			if !ok {
 				builderAddr, err = l.rollupClient.GetBuilder(winner)
-				if err != nil {
+				if err != nil || builderAddr.Cmp(common.Address{}) == 0 {
 					if errors.Is(err, ethereum.NotFound) {
 						l.logger.Warn(
 							"builder not registered",

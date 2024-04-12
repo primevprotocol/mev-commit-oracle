@@ -2,6 +2,8 @@ package updater
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	lru "github.com/hashicorp/golang-lru/v2"
 	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
 	"github.com/primevprotocol/mev-oracle/pkg/events"
@@ -177,6 +180,10 @@ func (u *Updater) subscribeOpenedCommitments(ctx context.Context) error {
 
 			winner, err := u.winnerRegister.GetWinner(ctx, int64(update.BlockNumber))
 			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					log.Warn("winner not found", "blockNumber", update.BlockNumber)
+					return nil
+				}
 				u.logger.Error(
 					"failed to get winner",
 					"blockNumber", update.BlockCommitedAt.Int64(),

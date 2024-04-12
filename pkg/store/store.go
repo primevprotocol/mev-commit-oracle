@@ -348,12 +348,15 @@ func (s *Store) MarkSettlementComplete(ctx context.Context, nonce uint64) (int, 
 }
 
 func (s *Store) LastNonce() (int64, error) {
-	var lastNonce int64
+	var lastNonce sql.NullInt64
 	err := s.db.QueryRow("SELECT MAX(nonce) FROM sent_transactions").Scan(&lastNonce)
 	if err != nil {
 		return 0, err
 	}
-	return lastNonce, nil
+	if !lastNonce.Valid {
+		return 0, nil
+	}
+	return lastNonce.Int64, nil
 }
 
 func (s *Store) SentTxn(nonce uint64, txHash common.Hash) error {

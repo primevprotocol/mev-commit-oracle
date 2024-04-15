@@ -141,6 +141,7 @@ func (u *Updater) subscribeEncryptedCommitments(ctx context.Context) error {
 				return err
 			}
 			u.metrics.EncryptedCommitmentsCount.Inc()
+			u.logger.Debug("added encrypted commitment", "commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]))
 			return nil
 		},
 	)
@@ -175,6 +176,7 @@ func (u *Updater) subscribeOpenedCommitments(ctx context.Context) error {
 			if alreadySettled {
 				// both bidders and providers could open commitments, so this could
 				// be a duplicate event
+				u.logger.Info("duplicate open commitment event", "commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]))
 				return nil
 			}
 
@@ -312,6 +314,7 @@ func (u *Updater) addSettlement(
 	case settler.SettlementTypeSlash:
 		u.metrics.SlashesCount.Inc()
 	}
+	u.logger.Info("added settlement", "commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]), "type", settlementType)
 
 	return nil
 }

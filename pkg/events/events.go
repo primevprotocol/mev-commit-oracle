@@ -273,6 +273,7 @@ func (l *Listener) Start(ctx context.Context) <-chan struct{} {
 						return
 					}
 					lastBlock = blockNumber
+					l.logger.Info("processed logs", "from", lastBlock+1, "to", blockNumber, "count", len(logs))
 				}
 			}
 		}

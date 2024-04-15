@@ -272,8 +272,8 @@ func (l *Listener) Start(ctx context.Context) <-chan struct{} {
 						l.logger.Error("failed to set last block", "error", err)
 						return
 					}
-					lastBlock = blockNumber
 					l.logger.Info("processed logs", "from", lastBlock+1, "to", blockNumber, "count", len(logs))
+					lastBlock = blockNumber
 				}
 			}
 		}

@@ -224,6 +224,10 @@ func (u *Updater) subscribeOpenedCommitments(ctx context.Context) error {
 						"bundle is not atomic",
 						"commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]),
 						"txnHash", update.TxnHash,
+						"blockNumber", update.BlockNumber,
+						"found", found,
+						"posInBlock", posInBlock,
+						"expectedPosInBlock", txns[commitmentTxnHashes[0]]+i,
 					)
 					// The committer did not include the transactions in the block
 					// correctly, so this is a slash to be processed

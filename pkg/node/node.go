@@ -118,6 +118,8 @@ func NewNode(opts *Options) (*Node, error) {
 		contracts,
 	)
 
+	evtMgrDone := evtMgr.Start(ctx)
+
 	var listenerL1Client l1Listener.EthClient
 
 	listenerL1Client = l1Client
@@ -251,6 +253,7 @@ func NewNode(opts *Options) (*Node, error) {
 			<-updtrClosed
 			<-settlrClosed
 			<-srvClosed
+			<-evtMgrDone
 		}()
 
 		<-closeChan

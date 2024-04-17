@@ -8,8 +8,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/primevprotocol/mev-oracle/pkg/events"
+	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -19,21 +23,52 @@ const (
 	defaultNamespace = "mev_commit_oracle"
 )
 
+type Store interface {
+	Settlement(context.Context, []byte) (settler.Settlement, error)
+}
+
 // Service wraps http.Server with additional functionality for metrics and
 // other common middlewares.
 type Service struct {
-	logger          *slog.Logger
-	metricsRegistry *prometheus.Registry
-	router          *http.ServeMux
-	srv             *http.Server
+	logger           *slog.Logger
+	metricsRegistry  *prometheus.Registry
+	router           *http.ServeMux
+	srv              *http.Server
+	evtMgr           events.EventManager
+	store            Store
+	statMu           sync.RWMutex
+	blockStats       *lru.Cache[uint64, *BlockStats]
+	providerStakes   *lru.Cache[string, *ProviderBalances]
+	bidderAllowances *lru.Cache[uint64, []*BidderAllowance]
+	lastBlock        uint64
+	shutdown         chan struct{}
 }
 
 // New creates a new Service.
-func New(logger *slog.Logger) *Service {
+func New(
+	logger *slog.Logger,
+	evm events.EventManager,
+	store Store,
+) *Service {
+	blockStats, _ := lru.New[uint64, *BlockStats](10000)
+	providerStakes, _ := lru.New[string, *ProviderBalances](1000)
+	bidderAllowances, _ := lru.New[uint64, []*BidderAllowance](1000)
+
 	srv := &Service{
-		logger:          logger,
-		router:          http.NewServeMux(),
-		metricsRegistry: newMetrics(),
+		logger:           logger,
+		router:           http.NewServeMux(),
+		metricsRegistry:  newMetrics(),
+		evtMgr:           evm,
+		store:            store,
+		shutdown:         make(chan struct{}),
+		blockStats:       blockStats,
+		providerStakes:   providerStakes,
+		bidderAllowances: bidderAllowances,
+	}
+
+	err := srv.configureDashboard()
+	if err != nil {
+		logger.Error("failed to configure dashboard", "error", err)
 	}
 
 	srv.registerDebugEndpoints()
@@ -115,6 +150,7 @@ func (s *Service) Stop() error {
 	if s.srv == nil {
 		return nil
 	}
+	defer close(s.shutdown)
 	return s.srv.Shutdown(context.Background())
 }
 

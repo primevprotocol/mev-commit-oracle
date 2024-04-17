@@ -16,9 +16,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	bidderregistry "github.com/primevprotocol/contracts-abi/clients/BidderRegistry"
 	blocktracker "github.com/primevprotocol/contracts-abi/clients/BlockTracker"
 	rollupclient "github.com/primevprotocol/contracts-abi/clients/Oracle"
 	preconf "github.com/primevprotocol/contracts-abi/clients/PreConfCommitmentStore"
+	providerregistry "github.com/primevprotocol/contracts-abi/clients/ProviderRegistry"
 	"github.com/primevprotocol/mev-oracle/pkg/apiserver"
 	"github.com/primevprotocol/mev-oracle/pkg/events"
 	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
@@ -30,21 +32,23 @@ import (
 )
 
 type Options struct {
-	Logger                   *slog.Logger
-	KeySigner                keysigner.KeySigner
-	HTTPPort                 int
-	SettlementRPCUrl         string
-	L1RPCUrl                 string
-	OracleContractAddr       common.Address
-	PreconfContractAddr      common.Address
-	BlockTrackerContractAddr common.Address
-	PgHost                   string
-	PgPort                   int
-	PgUser                   string
-	PgPassword               string
-	PgDbname                 string
-	LaggerdMode              int
-	OverrideWinners          []string
+	Logger                       *slog.Logger
+	KeySigner                    keysigner.KeySigner
+	HTTPPort                     int
+	SettlementRPCUrl             string
+	L1RPCUrl                     string
+	OracleContractAddr           common.Address
+	PreconfContractAddr          common.Address
+	BlockTrackerContractAddr     common.Address
+	ProviderRegistryContractAddr common.Address
+	BidderRegistryContractAddr   common.Address
+	PgHost                       string
+	PgPort                       int
+	PgUser                       string
+	PgPassword                   string
+	PgDbname                     string
+	LaggerdMode                  int
+	OverrideWinners              []string
 }
 
 type Node struct {
@@ -233,7 +237,11 @@ func NewNode(opts *Options) (*Node, error) {
 	)
 	settlrClosed := settlr.Start(ctx)
 
-	srv := apiserver.New(nd.logger.With("component", "apiserver"))
+	srv := apiserver.New(
+		nd.logger.With("component", "apiserver"),
+		evtMgr,
+		st,
+	)
 	srv.RegisterMetricsCollectors(l1Lis.Metrics()...)
 	srv.RegisterMetricsCollectors(updtr.Metrics()...)
 	srv.RegisterMetricsCollectors(settlr.Metrics()...)
@@ -325,6 +333,18 @@ func getContractABIs(opts *Options) (map[common.Address]*abi.ABI, error) {
 		return nil, err
 	}
 	abis[opts.PreconfContractAddr] = &pcABI
+
+	bidderRegistry, err := abi.JSON(strings.NewReader(bidderregistry.BidderregistryABI))
+	if err != nil {
+		return nil, err
+	}
+	abis[opts.BidderRegistryContractAddr] = &bidderRegistry
+
+	providerRegistry, err := abi.JSON(strings.NewReader(providerregistry.ProviderregistryABI))
+	if err != nil {
+		return nil, err
+	}
+	abis[opts.ProviderRegistryContractAddr] = &providerRegistry
 
 	return abis, nil
 }

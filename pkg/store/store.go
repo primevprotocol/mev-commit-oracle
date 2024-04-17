@@ -288,6 +288,35 @@ func (s *Store) SubscribeSettlements(
 	return resChan
 }
 
+func (s *Store) Settlement(
+	ctx context.Context,
+	commitmentIdx []byte,
+) (settler.Settlement, error) {
+	var st settler.Settlement
+	err := s.db.QueryRowContext(
+		ctx,
+		`
+		SELECT
+			transaction, block_number, builder_address, amount, bid_id, type,
+			decay_percentage
+		FROM settlements
+		WHERE commitment_index = $1`,
+		commitmentIdx,
+	).Scan(
+		&st.TxHash,
+		&st.BlockNum,
+		&st.Builder,
+		&st.Amount,
+		&st.BidID,
+		&st.Type,
+		&st.DecayPercentage,
+	)
+	if err != nil {
+		return st, err
+	}
+	return st, nil
+}
+
 func (s *Store) SettlementInitiated(
 	ctx context.Context,
 	commitmentIdx []byte,

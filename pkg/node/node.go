@@ -122,8 +122,6 @@ func NewNode(opts *Options) (*Node, error) {
 		contracts,
 	)
 
-	evtMgrDone := evtMgr.Start(ctx)
-
 	var listenerL1Client l1Listener.EthClient
 
 	listenerL1Client = l1Client
@@ -242,6 +240,9 @@ func NewNode(opts *Options) (*Node, error) {
 		evtMgr,
 		st,
 	)
+
+	evtMgrDone := evtMgr.Start(ctx)
+
 	srv.RegisterMetricsCollectors(l1Lis.Metrics()...)
 	srv.RegisterMetricsCollectors(updtr.Metrics()...)
 	srv.RegisterMetricsCollectors(settlr.Metrics()...)

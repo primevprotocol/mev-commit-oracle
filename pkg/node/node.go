@@ -346,6 +346,12 @@ func getContractABIs(opts *Options) (map[common.Address]*abi.ABI, error) {
 	}
 	abis[opts.ProviderRegistryContractAddr] = &providerRegistry
 
+	orABI, err := abi.JSON(strings.NewReader(rollupclient.OracleABI))
+	if err != nil {
+		return nil, err
+	}
+	abis[opts.OracleContractAddr] = &orABI
+
 	return abis, nil
 }
 

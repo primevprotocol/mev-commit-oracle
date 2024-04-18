@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -63,6 +64,8 @@ type Updater struct {
 	evtMgr           events.EventManager
 	l1BlockCache     *lru.Cache[uint64, map[string]int]
 	l2BlockTimeCache *lru.Cache[uint64, uint64]
+	encryptedMu      sync.Mutex
+	openedCmtMu      sync.Mutex
 	metrics          *metrics
 }
 
@@ -124,6 +127,9 @@ func (u *Updater) subscribeEncryptedCommitments(ctx context.Context) error {
 	ev := events.NewEventHandler(
 		"EncryptedCommitmentStored",
 		func(update *preconf.PreconfcommitmentstoreEncryptedCommitmentStored) error {
+			u.encryptedMu.Lock()
+			defer u.encryptedMu.Unlock()
+
 			err := u.winnerRegister.AddEncryptedCommitment(
 				ctx,
 				update.CommitmentIndex[:],
@@ -164,6 +170,9 @@ func (u *Updater) subscribeOpenedCommitments(ctx context.Context) error {
 	ev := events.NewEventHandler(
 		"CommitmentStored",
 		func(update *preconf.PreconfcommitmentstoreCommitmentStored) error {
+			u.openedCmtMu.Lock()
+			defer u.openedCmtMu.Unlock()
+
 			alreadySettled, err := u.winnerRegister.IsSettled(ctx, update.CommitmentIndex[:])
 			if err != nil {
 				u.logger.Error(
@@ -176,7 +185,10 @@ func (u *Updater) subscribeOpenedCommitments(ctx context.Context) error {
 			if alreadySettled {
 				// both bidders and providers could open commitments, so this could
 				// be a duplicate event
-				u.logger.Info("duplicate open commitment event", "commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]))
+				u.logger.Info(
+					"duplicate open commitment event",
+					"commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]),
+				)
 				return nil
 			}
 

@@ -227,6 +227,23 @@ func TestStore(t *testing.T) {
 		}
 	})
 
+	t.Run("IsSettled", func(t *testing.T) {
+		st, err := store.NewStore(db)
+		if err != nil {
+			t.Fatalf("Failed to create store: %s", err)
+		}
+
+		for _, settlement := range settlements {
+			settled, err := st.IsSettled(context.Background(), settlement.CommitmentIdx)
+			if err != nil {
+				t.Fatalf("Failed to check if settled: %s", err)
+			}
+			if !settled {
+				t.Fatalf("Expected settlement to be settled")
+			}
+		}
+	})
+
 	t.Run("SubscribeSettlements", func(t *testing.T) {
 		st, err := store.NewStore(db)
 		if err != nil {

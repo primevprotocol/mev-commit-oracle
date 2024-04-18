@@ -392,10 +392,9 @@ func (s *Service) configureDashboard() error {
 			s.statMu.RLock()
 			defer s.statMu.RUnlock()
 
-			start := s.lastBlock - uint64(limit*page)
-
-			if start < 0 {
-				start = s.lastBlock
+			start := s.lastBlock
+			if s.lastBlock > uint64(limit*page) {
+				start = s.lastBlock - uint64(limit*page)
 			}
 
 			dash := make([]*DashboardOut, 0)
@@ -410,10 +409,8 @@ func (s *Service) configureDashboard() error {
 					bidders = make([]*BidderAllowance, 0)
 				}
 
-				providers := make([]*ProviderBalances, 0)
-				for _, p := range s.providerStakes.Values() {
-					providers = append(providers, p)
-				}
+				providers := s.providerStakes.Values()
+
 				dashEntry := &DashboardOut{
 					Block:     stats,
 					Providers: providers,

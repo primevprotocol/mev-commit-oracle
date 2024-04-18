@@ -49,7 +49,7 @@ type DashboardOut struct {
 
 func (s *Service) configureDashboard() error {
 	blockEvt := events.NewEventHandler(
-		"NewBlock",
+		"NewL1Block",
 		func(upd *blocktracker.BlocktrackerNewL1Block) error {
 			s.statMu.Lock()
 			defer s.statMu.Unlock()

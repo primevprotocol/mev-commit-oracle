@@ -18,14 +18,13 @@ import (
 )
 
 type BlockStats struct {
-	Number                    uint64 `json:"number"`
-	Winner                    string `json:"winner"`
-	Window                    int64  `json:"window"`
-	TotalEncryptedCommitments int    `json:"total_encrypted_commitments"`
-	TotalOpenedCommitments    int    `json:"total_opened_commitments"`
-	TotalRewards              int    `json:"total_rewards"`
-	TotalSlashes              int    `json:"total_slashes"`
-	TotalAmount               string `json:"total_amount"`
+	Number                 uint64 `json:"number"`
+	Winner                 string `json:"winner"`
+	Window                 int64  `json:"window"`
+	TotalOpenedCommitments int    `json:"total_opened_commitments"`
+	TotalRewards           int    `json:"total_rewards"`
+	TotalSlashes           int    `json:"total_slashes"`
+	TotalAmount            string `json:"total_amount"`
 }
 
 type ProviderBalances struct {
@@ -37,7 +36,8 @@ type ProviderBalances struct {
 type BidderAllowance struct {
 	Bidder    string `json:"bidder"`
 	Allowance string `json:"allowance"`
-	// Used      string `json:"used"`
+	Refunds   string `json:"refunds"`
+	Settled   string `json:"settled"`
 	Withdrawn string `json:"withdrawn"`
 }
 
@@ -224,7 +224,7 @@ func (s *Service) configureDashboard() error {
 
 	providerRewards := events.NewEventHandler(
 		"FundsRewarded",
-		func(upd *providerregistry.ProviderregistryFundsRewarded) error {
+		func(upd *bidderregistry.BidderregistryFundsRewarded) error {
 			s.statMu.Lock()
 			defer s.statMu.Unlock()
 
@@ -239,6 +239,24 @@ func (s *Service) configureDashboard() error {
 			currentRewards = big.NewInt(0).Add(currentRewards, upd.Amount)
 			existing.Rewards = currentRewards.String()
 			_ = s.providerStakes.Add(upd.Provider.Hex(), existing)
+
+			existingBidders, ok := s.bidderAllowances.Get(upd.Window.Uint64())
+			if !ok {
+				return errors.New("window not found")
+			}
+			for _, b := range existingBidders {
+				if b.Bidder == upd.Bidder.Hex() {
+					currentSettled, ok := big.NewInt(0).SetString(b.Settled, 10)
+					if !ok {
+						return errors.New("failed to parse settled")
+					}
+					currentSettled = big.NewInt(0).Add(currentSettled, upd.Amount)
+					b.Settled = currentSettled.String()
+					break
+				}
+			}
+			_ = s.bidderAllowances.Add(upd.Window.Uint64(), existingBidders)
+
 			return nil
 		},
 	)
@@ -281,38 +299,38 @@ func (s *Service) configureDashboard() error {
 	}
 	subs = append(subs, sub)
 
-	// bidderPayments := events.NewEventHandler(
-	// 	"FundsRetrieved",
-	// 	func(upd *bidderregistry.BidderregistryFundsRetrieved) error {
-	// 		s.statMu.Lock()
-	// 		defer s.statMu.Unlock()
+	bidderPayments := events.NewEventHandler(
+		"FundsRetrieved",
+		func(upd *bidderregistry.BidderregistryFundsRetrieved) error {
+			s.statMu.Lock()
+			defer s.statMu.Unlock()
 
-	// 		existing, ok := s.bidderAllowances.Get(upd.Window.Uint64())
-	// 		if !ok {
-	// 			return errors.New("window not found")
-	// 		}
+			existing, ok := s.bidderAllowances.Get(upd.Window.Uint64())
+			if !ok {
+				return errors.New("window not found")
+			}
 
-	// 		for _, b := range existing {
-	// 			if b.Bidder == upd.Bidder.Hex() {
-	// 				currentUsed, ok := big.NewInt(0).SetString(b.Used, 10)
-	// 				if !ok {
-	// 					return errors.New("failed to parse used")
-	// 				}
-	// 				currentUsed = big.NewInt(0).Add(currentUsed, upd.Amount)
-	// 				b.Used = currentUsed.String()
-	// 				break
-	// 			}
-	// 		}
-	// 		_ = s.bidderAllowances.Add(upd.Window.Uint64(), existing)
-	// 		return nil
-	// 	},
-	// )
+			for _, b := range existing {
+				if b.Bidder == upd.Bidder.Hex() {
+					currentReturned, ok := big.NewInt(0).SetString(b.Refunds, 10)
+					if !ok {
+						return errors.New("failed to parse used")
+					}
+					currentReturned = big.NewInt(0).Add(currentReturned, upd.Amount)
+					b.Refunds = currentReturned.String()
+					break
+				}
+			}
+			_ = s.bidderAllowances.Add(upd.Window.Uint64(), existing)
+			return nil
+		},
+	)
 
-	// sub, err = s.evtMgr.Subscribe(bidderPayments)
-	// if err != nil {
-	// 	return err
-	// }
-	// subs = append(subs, sub)
+	sub, err = s.evtMgr.Subscribe(bidderPayments)
+	if err != nil {
+		return err
+	}
+	subs = append(subs, sub)
 
 	bidderWithdrawals := events.NewEventHandler(
 		"BidderWithdrawal",
@@ -389,11 +407,20 @@ func (s *Service) configureDashboard() error {
 				}
 			}
 
+			lastBlock := s.lastBlock
+			lastBlockStr := r.URL.Query().Get("last_block")
+			if lastBlockStr != "" {
+				lb, err := strconv.ParseUint(lastBlockStr, 10, 64)
+				if err == nil {
+					lastBlock = lb
+				}
+			}
+
 			s.statMu.RLock()
 			defer s.statMu.RUnlock()
 
-			start := s.lastBlock
-			if s.lastBlock > uint64(limit*page) {
+			start := lastBlock
+			if start > uint64(limit*page) {
 				start = s.lastBlock - uint64(limit*page)
 			}
 

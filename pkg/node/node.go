@@ -25,7 +25,6 @@ import (
 	"github.com/primevprotocol/mev-oracle/pkg/events"
 	"github.com/primevprotocol/mev-oracle/pkg/keysigner"
 	"github.com/primevprotocol/mev-oracle/pkg/l1Listener"
-	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/primevprotocol/mev-oracle/pkg/store"
 	"github.com/primevprotocol/mev-oracle/pkg/transactor"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
@@ -129,24 +128,6 @@ func NewNode(opts *Options) (*Node, error) {
 		listenerL1Client = &laggerdL1Client{EthClient: listenerL1Client, amount: opts.LaggerdMode}
 	}
 
-	callOpts := bind.CallOpts{
-		Pending: false,
-		From:    owner,
-		Context: ctx,
-	}
-
-	oracleCaller, err := rollupclient.NewOracleCaller(opts.OracleContractAddr, settlementClient)
-	if err != nil {
-		nd.logger.Error("failed to instantiate oracle caller", "error", err)
-		cancel()
-		return nil, err
-	}
-
-	oracleCallerSession := &rollupclient.OracleCallerSession{
-		Contract: oracleCaller,
-		CallOpts: callOpts,
-	}
-
 	blockTracker, err := blocktracker.NewBlocktrackerTransactor(
 		opts.BlockTrackerContractAddr,
 		txnMgr,
@@ -189,7 +170,7 @@ func NewNode(opts *Options) (*Node, error) {
 		for _, winner := range opts.OverrideWinners {
 			err := setBuilderMapping(
 				ctx,
-				oracleTransactorSession,
+				blockTrackerTransactor,
 				settlementClient,
 				winner,
 				winner,
@@ -206,7 +187,6 @@ func NewNode(opts *Options) (*Node, error) {
 		nd.logger.With("component", "l1_listener"),
 		listenerL1Client,
 		st,
-		oracleCallerSession,
 		evtMgr,
 		blockTrackerTransactor,
 	)
@@ -218,6 +198,7 @@ func NewNode(opts *Options) (*Node, error) {
 		settlementClient,
 		st,
 		evtMgr,
+		oracleTransactorSession,
 	)
 	if err != nil {
 		nd.logger.Error("failed to instantiate updater", "error", err)
@@ -226,14 +207,6 @@ func NewNode(opts *Options) (*Node, error) {
 	}
 
 	updtrClosed := updtr.Start(ctx)
-
-	settlr := settler.NewSettler(
-		nd.logger.With("component", "settler"),
-		oracleTransactorSession,
-		st,
-		evtMgr,
-	)
-	settlrClosed := settlr.Start(ctx)
 
 	srv := apiserver.New(
 		nd.logger.With("component", "apiserver"),
@@ -245,7 +218,7 @@ func NewNode(opts *Options) (*Node, error) {
 
 	srv.RegisterMetricsCollectors(l1Lis.Metrics()...)
 	srv.RegisterMetricsCollectors(updtr.Metrics()...)
-	srv.RegisterMetricsCollectors(settlr.Metrics()...)
+	srv.RegisterMetricsCollectors(txnMgr.Metrics()...)
 
 	srvClosed := srv.Start(fmt.Sprintf(":%d", opts.HTTPPort))
 
@@ -260,7 +233,6 @@ func NewNode(opts *Options) (*Node, error) {
 
 			<-l1LisClosed
 			<-updtrClosed
-			<-settlrClosed
 			<-srvClosed
 			<-evtMgrDone
 		}()
@@ -389,13 +361,13 @@ func (w *winnerOverrideL1Client) HeaderByNumber(ctx context.Context, number *big
 
 func setBuilderMapping(
 	ctx context.Context,
-	oracle *rollupclient.OracleTransactorSession,
+	bt *blocktracker.BlocktrackerTransactorSession,
 	client *ethclient.Client,
 	builderName string,
 	builderAddress string,
 ) error {
 	fmt.Println("Setting builder mapping", builderName, builderAddress)
-	txn, err := oracle.AddBuilderAddress(builderName, common.HexToAddress(builderAddress))
+	txn, err := bt.AddBuilderAddress(builderName, common.HexToAddress(builderAddress))
 	if err != nil {
 		return err
 	}

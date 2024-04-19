@@ -3,13 +3,10 @@ package l1Listener
 import (
 	"bytes"
 	"context"
-	"errors"
 	"log/slog"
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	blocktracker "github.com/primevprotocol/contracts-abi/clients/BlockTracker"
 	"github.com/primevprotocol/mev-oracle/pkg/events"
@@ -20,7 +17,7 @@ import (
 var checkInterval = 2 * time.Second
 
 type L1Recorder interface {
-	RecordL1Block(blockNum *big.Int, winner common.Address) (*types.Transaction, error)
+	RecordL1Block(blockNum *big.Int, winner string) (*types.Transaction, error)
 }
 
 type WinnerRegister interface {
@@ -32,38 +29,29 @@ type EthClient interface {
 	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
 }
 
-type Oracle interface {
-	GetBuilder(builder string) (common.Address, error)
-}
-
 type L1Listener struct {
-	logger               *slog.Logger
-	l1Client             EthClient
-	winnerRegister       WinnerRegister
-	rollupClient         Oracle
-	builderIdentityCache map[string]common.Address
-	eventMgr             events.EventManager
-	recorder             L1Recorder
-	metrics              *metrics
+	logger         *slog.Logger
+	l1Client       EthClient
+	winnerRegister WinnerRegister
+	eventMgr       events.EventManager
+	recorder       L1Recorder
+	metrics        *metrics
 }
 
 func NewL1Listener(
 	logger *slog.Logger,
 	l1Client EthClient,
 	winnerRegister WinnerRegister,
-	oracle Oracle,
 	evtMgr events.EventManager,
 	recorder L1Recorder,
 ) *L1Listener {
 	return &L1Listener{
-		logger:               logger,
-		l1Client:             l1Client,
-		winnerRegister:       winnerRegister,
-		rollupClient:         oracle,
-		eventMgr:             evtMgr,
-		recorder:             recorder,
-		builderIdentityCache: make(map[string]common.Address),
-		metrics:              newMetrics(),
+		logger:         logger,
+		l1Client:       l1Client,
+		winnerRegister: winnerRegister,
+		eventMgr:       evtMgr,
+		recorder:       recorder,
+		metrics:        newMetrics(),
 	}
 }
 
@@ -105,6 +93,8 @@ func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 					)
 					return err
 				}
+				l.metrics.WinnerCount.Inc()
+				l.metrics.WinnerRoundCount.WithLabelValues(update.Winner.String()).Inc()
 				return nil
 			},
 		)
@@ -162,45 +152,27 @@ func (l *L1Listener) watchL1Block(ctx context.Context) error {
 
 			winner := string(bytes.ToValidUTF8(header.Extra, []byte("�")))
 
-			builderAddr, ok := l.builderIdentityCache[winner]
-			if !ok {
-				builderAddr, err = l.rollupClient.GetBuilder(winner)
-				if err != nil || builderAddr.Cmp(common.Address{}) == 0 {
-					if errors.Is(err, ethereum.NotFound) {
-						l.logger.Warn(
-							"builder not registered",
-							"builder", winner,
-							"block", header.Number.Int64(),
-						)
-					}
-					l.logger.Error("failed to get builder address", "error", err)
-					continue
-				}
-				l.builderIdentityCache[winner] = builderAddr
-			}
-
 			l.logger.Info(
 				"new L1 winner",
 				"winner", winner,
 				"block", header.Number.Int64(),
-				"builder", builderAddr.String(),
 			)
 
 			winnerPostingTxn, err := l.recorder.RecordL1Block(
 				big.NewInt(0).SetUint64(blockNum),
-				builderAddr,
+				winner,
 			)
 			if err != nil {
 				l.logger.Error("failed to register winner for block", "block", blockNum, "error", err)
 				return err
 			}
 
-			l.metrics.WinnerRoundCount.WithLabelValues(builderAddr.String()).Inc()
-			l.metrics.WinnerCount.Inc()
+			l.metrics.WinnerPostedCount.Inc()
+			l.metrics.LastSentNonce.Set(float64(winnerPostingTxn.Nonce()))
 
 			l.logger.Info(
 				"registered winner",
-				"winner", builderAddr.String(),
+				"winner", winner,
 				"block", header.Number.Int64(),
 				"txn", winnerPostingTxn.Hash().String(),
 			)

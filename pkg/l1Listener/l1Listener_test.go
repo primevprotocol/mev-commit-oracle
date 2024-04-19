@@ -33,9 +33,6 @@ func TestL1Listener(t *testing.T) {
 		headers: make(map[uint64]*types.Header),
 		errC:    make(chan error, 1),
 	}
-	oracle := &testOracle{
-		builderMap: make(map[string]common.Address),
-	}
 	btABI, err := abi.JSON(strings.NewReader(blocktracker.BlocktrackerABI))
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +50,6 @@ func TestL1Listener(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		ethClient,
 		reg,
-		oracle,
 		eventManager,
 		rec,
 	)
@@ -71,8 +67,6 @@ func TestL1Listener(t *testing.T) {
 			Number: big.NewInt(int64(i)),
 			Extra:  []byte(fmt.Sprintf("b%d", i)),
 		})
-		addr := common.HexToAddress(fmt.Sprintf("0x%d", i))
-		oracle.AddBuilder(fmt.Sprintf("b%d", i), addr)
 
 		select {
 		case <-time.After(5 * time.Second):
@@ -81,7 +75,7 @@ func TestL1Listener(t *testing.T) {
 			if update.blockNum.Int64() != int64(i) {
 				t.Fatal("wrong block number")
 			}
-			if update.winner.Cmp(addr) != 0 {
+			if update.winner != fmt.Sprintf("b%d", i) {
 				t.Fatal("wrong winner")
 			}
 		}
@@ -98,8 +92,6 @@ func TestL1Listener(t *testing.T) {
 		Number: big.NewInt(11),
 		Extra:  []byte("b11"),
 	})
-	addr := common.HexToAddress("0x11")
-	oracle.AddBuilder("b11", addr)
 
 	// ensure no winner is sent for the previous block
 	select {
@@ -109,7 +101,7 @@ func TestL1Listener(t *testing.T) {
 		if update.blockNum.Int64() != 11 {
 			t.Fatal("wrong block number")
 		}
-		if update.winner.Cmp(addr) != 0 {
+		if update.winner != "b11" {
 			t.Fatal("wrong winner")
 		}
 	}
@@ -214,29 +206,6 @@ func (t *testEthClient) HeaderByNumber(_ context.Context, number *big.Int) (*typ
 	return hdr, nil
 }
 
-type testOracle struct {
-	mu         sync.Mutex
-	builderMap map[string]common.Address
-}
-
-func (t *testOracle) AddBuilder(builder string, addr common.Address) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.builderMap[builder] = addr
-}
-
-func (t *testOracle) GetBuilder(builder string) (common.Address, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	addr, ok := t.builderMap[builder]
-	if !ok {
-		return common.Address{}, errors.New("builder not found")
-	}
-	return addr, nil
-}
-
 type testEventManager struct {
 	btABI      *abi.ABI
 	handler    events.EventHandler
@@ -290,14 +259,14 @@ func (t *testEventManager) publish(blockNum *big.Int, winner common.Address, win
 
 type l1Update struct {
 	blockNum *big.Int
-	winner   common.Address
+	winner   string
 }
 
 type testRecorder struct {
 	updates chan l1Update
 }
 
-func (t *testRecorder) RecordL1Block(blockNum *big.Int, addr common.Address) (*types.Transaction, error) {
-	t.updates <- l1Update{blockNum: blockNum, winner: addr}
-	return types.NewTransaction(0, addr, nil, 0, nil, nil), nil
+func (t *testRecorder) RecordL1Block(blockNum *big.Int, winner string) (*types.Transaction, error) {
+	t.updates <- l1Update{blockNum: blockNum, winner: winner}
+	return types.NewTransaction(0, common.Address{}, nil, 0, nil, nil), nil
 }

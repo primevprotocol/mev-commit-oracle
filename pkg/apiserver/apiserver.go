@@ -13,7 +13,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/primevprotocol/mev-oracle/pkg/events"
-	"github.com/primevprotocol/mev-oracle/pkg/settler"
+	"github.com/primevprotocol/mev-oracle/pkg/updater"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -24,7 +24,7 @@ const (
 )
 
 type Store interface {
-	Settlement(context.Context, []byte) (settler.Settlement, error)
+	Settlement(context.Context, []byte) (updater.Settlement, error)
 }
 
 // Service wraps http.Server with additional functionality for metrics and

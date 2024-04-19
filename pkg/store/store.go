@@ -8,13 +8,12 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	_ "github.com/lib/pq"
-	"github.com/primevprotocol/mev-oracle/pkg/settler"
 	"github.com/primevprotocol/mev-oracle/pkg/updater"
 )
 
 var settlementType = `
 DO $$ BEGIN
-    CREATE TYPE settlement_type AS ENUM ('reward', 'slash', 'return');
+    CREATE TYPE settlement_type AS ENUM ('reward', 'slash');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;`
@@ -167,9 +166,11 @@ func (s *Store) AddSettlement(
 	amount uint64,
 	builder []byte,
 	bidID []byte,
-	settlementType settler.SettlementType,
+	settlementType updater.SettlementType,
 	decayPercentage int64,
 	window int64,
+	postingTxnHash []byte,
+	postingTxnNonce uint64,
 ) error {
 	columns := []string{
 		"commitment_index",
@@ -194,8 +195,8 @@ func (s *Store) AddSettlement(
 		amount,
 		bidID,
 		false,
-		nil,
-		0,
+		postingTxnHash,
+		postingTxnNonce,
 		decayPercentage,
 		window,
 	}
@@ -234,65 +235,11 @@ func (s *Store) IsSettled(
 	return settled, nil
 }
 
-func (s *Store) SubscribeSettlements(
-	ctx context.Context,
-	window int64,
-) <-chan settler.Settlement {
-	resChan := make(chan settler.Settlement)
-
-	go func() {
-		defer close(resChan)
-
-		queryStr := `
-				SELECT
-					commitment_index, transaction, block_number,
-					builder_address, amount, bid_id, type, decay_percentage
-				FROM settlements
-				WHERE settlement_window = $1 AND settled = false AND chainhash IS NULL AND type != 'return'
-				ORDER BY block_number ASC`
-
-		results, err := s.db.QueryContext(ctx, queryStr, window)
-		if err != nil {
-			return
-		}
-
-		for results.Next() {
-			var s settler.Settlement
-
-			err = results.Scan(
-				&s.CommitmentIdx,
-				&s.TxHash,
-				&s.BlockNum,
-				&s.Builder,
-				&s.Amount,
-				&s.BidID,
-				&s.Type,
-				&s.DecayPercentage,
-			)
-			if err != nil {
-				_ = results.Close()
-				return
-			}
-
-			select {
-			case <-ctx.Done():
-				_ = results.Close()
-				return
-			case resChan <- s:
-			}
-		}
-
-		_ = results.Close()
-	}()
-
-	return resChan
-}
-
 func (s *Store) Settlement(
 	ctx context.Context,
 	commitmentIdx []byte,
-) (settler.Settlement, error) {
-	var st settler.Settlement
+) (updater.Settlement, error) {
+	var st updater.Settlement
 	err := s.db.QueryRowContext(
 		ctx,
 		`
@@ -315,25 +262,6 @@ func (s *Store) Settlement(
 		return st, err
 	}
 	return st, nil
-}
-
-func (s *Store) SettlementInitiated(
-	ctx context.Context,
-	commitmentIdx []byte,
-	txHash common.Hash,
-	nonce uint64,
-) error {
-	_, err := s.db.ExecContext(
-		ctx,
-		"UPDATE settlements SET chainhash = $1, nonce = $2 WHERE commitment_index = $3",
-		txHash.Bytes(),
-		nonce,
-		commitmentIdx,
-	)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func (s *Store) MarkSettlementComplete(ctx context.Context, nonce uint64) (int, error) {

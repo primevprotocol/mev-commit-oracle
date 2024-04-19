@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var allowedPendingTxnCount = 128
@@ -26,7 +27,7 @@ type EVMClient interface {
 	NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error)
 }
 
-type transactor struct {
+type Transactor struct {
 	EVMClient
 	store              TxnStore
 	owner              common.Address
@@ -38,6 +39,7 @@ type transactor struct {
 	confirmedNonce     uint64
 	confirmedCond      *sync.Cond
 	logger             *slog.Logger
+	metrics            *metrics
 }
 
 func NewContractTransactor(
@@ -46,19 +48,20 @@ func NewContractTransactor(
 	store TxnStore,
 	owner common.Address,
 	logger *slog.Logger,
-) (bind.ContractTransactor, error) {
+) (*Transactor, error) {
 	nonce, err := store.LastNonce()
 	if err != nil {
 		return nil, err
 	}
 
-	t := &transactor{
+	t := &Transactor{
 		EVMClient: client,
 		store:     store,
 		owner:     owner,
 		logger:    logger,
 		nonce:     uint64(nonce),
 		queue:     make([]uint64, 0, allowedPendingTxnCount),
+		metrics:   newMetrics(),
 	}
 
 	t.qCond = sync.NewCond(&t.nonceLock)
@@ -69,7 +72,11 @@ func NewContractTransactor(
 	return t, nil
 }
 
-func (t *transactor) txStatusUpdater(ctx context.Context) {
+func (t *Transactor) Metrics() []prometheus.Collector {
+	return t.metrics.Collectors()
+}
+
+func (t *Transactor) txStatusUpdater(ctx context.Context) {
 	queryTicker := time.NewTicker(500 * time.Millisecond)
 	defer queryTicker.Stop()
 
@@ -106,6 +113,8 @@ func (t *transactor) txStatusUpdater(ctx context.Context) {
 		t.confirmedCond.Broadcast()
 		t.confirmedNonceLock.Unlock()
 
+		t.metrics.LastConfirmedNonce.Set(float64(lastNonce))
+
 		count, err := t.store.MarkSettlementComplete(ctx, lastNonce)
 		if err != nil {
 			t.logger.Error("failed to mark settlement complete", "error", err)
@@ -120,7 +129,7 @@ func (t *transactor) txStatusUpdater(ctx context.Context) {
 	}
 }
 
-func (t *transactor) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
+func (t *Transactor) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
 	t.nonceLock.Lock()
 	defer t.nonceLock.Unlock()
 
@@ -137,10 +146,12 @@ func (t *transactor) PendingNonceAt(ctx context.Context, account common.Address)
 	t.nonce++
 	t.queue = append(t.queue, nonceToReturn)
 
+	t.metrics.LastUsedNonce.Set(float64(nonceToReturn))
+
 	return nonceToReturn, nil
 }
 
-func (t *transactor) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+func (t *Transactor) SendTransaction(ctx context.Context, tx *types.Transaction) error {
 	// Wait if we have too many pending transactions
 	t.confirmedNonceLock.Lock()
 	for tx.Nonce()-t.confirmedNonce > uint64(allowedPendingTxnCount) {
@@ -163,6 +174,8 @@ func (t *transactor) SendTransaction(ctx context.Context, tx *types.Transaction)
 
 	t.queue = t.queue[1:]
 	t.qCond.Broadcast()
+
+	t.metrics.LastSentNonce.Set(float64(tx.Nonce()))
 
 	return t.store.SentTxn(tx.Nonce(), tx.Hash())
 }

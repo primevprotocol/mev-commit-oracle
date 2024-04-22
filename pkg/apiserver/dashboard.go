@@ -129,7 +129,7 @@ func (s *Service) configureDashboard() error {
 			}
 			currentAmount, ok := big.NewInt(0).SetString(existing.TotalAmount, 10)
 			if !ok {
-				return errors.New("failed to parse total amount")
+				currentAmount = big.NewInt(0)
 			}
 			currentAmount = big.NewInt(0).Add(currentAmount, big.NewInt(0).SetUint64(cmt.Amount))
 			existing.TotalAmount = currentAmount.String()
@@ -234,7 +234,7 @@ func (s *Service) configureDashboard() error {
 			}
 			currentRewards, ok := big.NewInt(0).SetString(existing.Rewards, 10)
 			if !ok {
-				return errors.New("failed to parse rewards")
+				currentRewards = big.NewInt(0)
 			}
 			currentRewards = big.NewInt(0).Add(currentRewards, upd.Amount)
 			existing.Rewards = currentRewards.String()
@@ -248,7 +248,7 @@ func (s *Service) configureDashboard() error {
 				if b.Bidder == upd.Bidder.Hex() {
 					currentSettled, ok := big.NewInt(0).SetString(b.Settled, 10)
 					if !ok {
-						return errors.New("failed to parse settled")
+						currentSettled = big.NewInt(0)
 					}
 					currentSettled = big.NewInt(0).Add(currentSettled, upd.Amount)
 					b.Settled = currentSettled.String()
@@ -314,7 +314,7 @@ func (s *Service) configureDashboard() error {
 				if b.Bidder == upd.Bidder.Hex() {
 					currentReturned, ok := big.NewInt(0).SetString(b.Refunds, 10)
 					if !ok {
-						return errors.New("failed to parse used")
+						currentReturned = big.NewInt(0)
 					}
 					currentReturned = big.NewInt(0).Add(currentReturned, upd.Amount)
 					b.Refunds = currentReturned.String()

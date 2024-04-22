@@ -212,6 +212,8 @@ func (l *Listener) publishLogEvent(ctx context.Context, log types.Log) {
 				select {
 				case ev.errCh <- err:
 				case <-ctx.Done():
+				default:
+					l.logger.Error("failed to send error to subscriber", "error", err, "event", ev.event.EventName())
 				}
 			}
 		}()

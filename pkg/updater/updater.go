@@ -465,7 +465,12 @@ func (u *Updater) addSettlement(
 	case SettlementTypeSlash:
 		u.metrics.SlashesCount.Inc()
 	}
-	u.logger.Info("added settlement", "commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]), "type", settlementType)
+	u.logger.Info(
+		"added settlement",
+		"commitmentIdx", common.Bytes2Hex(update.CommitmentIndex[:]),
+		"type", settlementType,
+		"decayPercentage", decayPercentage,
+	)
 
 	return nil
 }

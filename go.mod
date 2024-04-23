@@ -6,7 +6,7 @@ require (
 	github.com/ethereum/go-ethereum v1.13.5
 	github.com/google/go-cmp v0.6.0
 	github.com/lib/pq v1.10.9
-	github.com/primevprotocol/contracts-abi v0.2.4-0.20240419134844-6dd1a8c7bf60
+	github.com/primevprotocol/contracts-abi v0.2.4-0.20240423171419-a959d3727058
 	github.com/prometheus/client_golang v1.14.0
 	github.com/testcontainers/testcontainers-go v0.27.0
 	github.com/urfave/cli/v2 v2.27.1

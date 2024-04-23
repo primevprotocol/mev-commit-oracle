@@ -322,6 +322,8 @@ github.com/primevprotocol/contracts-abi v0.2.4-0.20240401131709-dcd3b451314a h1:
 github.com/primevprotocol/contracts-abi v0.2.4-0.20240401131709-dcd3b451314a/go.mod h1:dE2KkvEqC+itvPa3SCrqQfvH5Hfnfn6omNRwWDTdIp8=
 github.com/primevprotocol/contracts-abi v0.2.4-0.20240419134844-6dd1a8c7bf60 h1:FEYkczFrI/CwTZRm0wARuWshpn185BEw4uFAKxlqQBg=
 github.com/primevprotocol/contracts-abi v0.2.4-0.20240419134844-6dd1a8c7bf60/go.mod h1:dE2KkvEqC+itvPa3SCrqQfvH5Hfnfn6omNRwWDTdIp8=
+github.com/primevprotocol/contracts-abi v0.2.4-0.20240423171419-a959d3727058 h1:IG9XeHGs8/S9tW/4dfLosOa6NL0LGODp+FvWVIWNIBE=
+github.com/primevprotocol/contracts-abi v0.2.4-0.20240423171419-a959d3727058/go.mod h1:dE2KkvEqC+itvPa3SCrqQfvH5Hfnfn6omNRwWDTdIp8=
 github.com/prometheus/client_golang v1.14.0 h1:nJdhIvne2eSX/XRAFV9PcvFFRbrjbcTUj0VP62TMhnw=
 github.com/prometheus/client_golang v1.14.0/go.mod h1:8vpkKitgIVNcqrRBWh1C4TIUQgYNtG/XQE4E/Zae36Y=
 github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=

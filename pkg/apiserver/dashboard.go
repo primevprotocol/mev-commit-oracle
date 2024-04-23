@@ -286,7 +286,7 @@ func (s *Service) configureDashboard() error {
 
 			existing = append(existing, &BidderAllowance{
 				Bidder:    upd.Bidder.Hex(),
-				Allowance: upd.PrepaidAmount.String(),
+				Allowance: upd.DepositedAmount.String(),
 			})
 			_ = s.bidderAllowances.Add(upd.WindowNumber.Uint64(), existing)
 			return nil

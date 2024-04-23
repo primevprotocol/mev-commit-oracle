@@ -8,13 +8,20 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
+	blocktracker "github.com/primevprotocol/contracts-abi/clients/BlockTracker"
+	"github.com/primevprotocol/mev-oracle/pkg/events"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/errgroup"
 )
 
 var checkInterval = 2 * time.Second
 
+type L1Recorder interface {
+	RecordL1Block(blockNum *big.Int, winner string) (*types.Transaction, error)
+}
+
 type WinnerRegister interface {
-	RegisterWinner(ctx context.Context, blockNum int64, winner string) error
+	RegisterWinner(ctx context.Context, blockNum int64, winner []byte, window int64) error
 }
 
 type EthClient interface {
@@ -26,6 +33,8 @@ type L1Listener struct {
 	logger         *slog.Logger
 	l1Client       EthClient
 	winnerRegister WinnerRegister
+	eventMgr       events.EventManager
+	recorder       L1Recorder
 	metrics        *metrics
 }
 
@@ -33,11 +42,15 @@ func NewL1Listener(
 	logger *slog.Logger,
 	l1Client EthClient,
 	winnerRegister WinnerRegister,
+	evtMgr events.EventManager,
+	recorder L1Recorder,
 ) *L1Listener {
 	return &L1Listener{
 		logger:         logger,
 		l1Client:       l1Client,
 		winnerRegister: winnerRegister,
+		eventMgr:       evtMgr,
+		recorder:       recorder,
 		metrics:        newMetrics(),
 	}
 }
@@ -49,55 +62,121 @@ func (l *L1Listener) Metrics() []prometheus.Collector {
 func (l *L1Listener) Start(ctx context.Context) <-chan struct{} {
 	doneChan := make(chan struct{})
 
-	go func() {
-		defer close(doneChan)
+	eg, egCtx := errgroup.WithContext(ctx)
 
-		ticker := time.NewTicker(checkInterval)
-		defer ticker.Stop()
+	eg.Go(func() error {
+		return l.watchL1Block(egCtx)
+	})
 
-		currentBlockNo := 0
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				blockNum, err := l.l1Client.BlockNumber(ctx)
+	eg.Go(func() error {
+		evt := events.NewEventHandler(
+			"NewL1Block",
+			func(update *blocktracker.BlocktrackerNewL1Block) error {
+				l.logger.Info(
+					"new L1 block event",
+					"block", update.BlockNumber,
+					"winner", update.Winner.String(),
+					"window", update.Window,
+				)
+				err := l.winnerRegister.RegisterWinner(
+					ctx,
+					update.BlockNumber.Int64(),
+					update.Winner.Bytes(),
+					update.Window.Int64(),
+				)
 				if err != nil {
-					l.logger.Error("failed to get block number", "error", err)
-					continue
+					l.logger.Error(
+						"failed to register winner",
+						"block", update.BlockNumber,
+						"winner", update.Winner.String(),
+						"error", err,
+					)
+					return err
 				}
+				l.metrics.WinnerCount.Inc()
+				l.metrics.WinnerRoundCount.WithLabelValues(update.Winner.String()).Inc()
+				return nil
+			},
+		)
 
-				if blockNum <= uint64(currentBlockNo) {
-					continue
-				}
-
-				header, err := l.l1Client.HeaderByNumber(ctx, big.NewInt(int64(blockNum)))
-				if err != nil {
-					l.logger.Error("failed to get header", "block", blockNum, "error", err)
-					continue
-				}
-
-				winner := string(bytes.ToValidUTF8(header.Extra, []byte("�")))
-				if len(winner) == 0 {
-					l.logger.Warn("no winner registered", "block", header.Number.Int64())
-					continue
-				} else {
-					err = l.winnerRegister.RegisterWinner(ctx, int64(blockNum), winner)
-					if err != nil {
-						l.logger.Error("failed to register winner for block", "block", blockNum, "error", err)
-						return
-					}
-
-					l.metrics.WinnerRoundCount.WithLabelValues(winner).Inc()
-					l.metrics.WinnerCount.Inc()
-
-					l.logger.Info("registered winner", "winner", winner, "block", header.Number.Int64())
-				}
-				currentBlockNo = int(blockNum)
-			}
+		sub, err := l.eventMgr.Subscribe(evt)
+		if err != nil {
+			return err
 		}
 
+		defer sub.Unsubscribe()
+
+		select {
+		case <-egCtx.Done():
+			return egCtx.Err()
+		case err := <-sub.Err():
+			return err
+		}
+	})
+
+	go func() {
+		defer close(doneChan)
+		if err := eg.Wait(); err != nil {
+			l.logger.Error("L1listener error", "error", err)
+		}
 	}()
 
 	return doneChan
+}
+
+func (l *L1Listener) watchL1Block(ctx context.Context) error {
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	currentBlockNo := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			blockNum, err := l.l1Client.BlockNumber(ctx)
+			if err != nil {
+				l.logger.Error("failed to get block number", "error", err)
+				continue
+			}
+
+			if blockNum <= uint64(currentBlockNo) {
+				continue
+			}
+
+			header, err := l.l1Client.HeaderByNumber(ctx, big.NewInt(int64(blockNum)))
+			if err != nil {
+				l.logger.Error("failed to get header", "block", blockNum, "error", err)
+				continue
+			}
+
+			winner := string(bytes.ToValidUTF8(header.Extra, []byte("�")))
+
+			l.logger.Info(
+				"new L1 winner",
+				"winner", winner,
+				"block", header.Number.Int64(),
+			)
+
+			winnerPostingTxn, err := l.recorder.RecordL1Block(
+				big.NewInt(0).SetUint64(blockNum),
+				winner,
+			)
+			if err != nil {
+				l.logger.Error("failed to register winner for block", "block", blockNum, "error", err)
+				return err
+			}
+
+			l.metrics.WinnerPostedCount.Inc()
+			l.metrics.LastSentNonce.Set(float64(winnerPostingTxn.Nonce()))
+
+			l.logger.Info(
+				"registered winner",
+				"winner", winner,
+				"block", header.Number.Int64(),
+				"txn", winnerPostingTxn.Hash().String(),
+			)
+			currentBlockNo = int(blockNum)
+		}
+	}
 }
